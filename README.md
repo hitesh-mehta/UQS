@@ -29,7 +29,7 @@
 14. [Development Status](#-development-status)
 15. [Technology Stack](#-technology-stack)
 16. [Contributing & DCO](#-contributing--dco)
-
+17. [Presentation](#-presentation)
 ---
 
 ## 🚀 What is UQS?
@@ -909,6 +909,12 @@ The `-s` flag adds `Signed-off-by: Hitesh Mehta <hteshpooja@gmail.com>` to your 
 6. Open a PR with a clear description
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for full guidelines.
+
+---
+
+## 📊 Presentation
+
+- 📥 [Download PPT](./UQS_Zenith_NatWest_2026.pptx)
 
 ---
 
