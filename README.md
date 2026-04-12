@@ -340,7 +340,7 @@ ollama pull gemma2:2b
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/your-org/uqs.git
+git clone https://github.com/hitesh-mehta/UQS
 cd uqs
 ```
 
@@ -640,7 +640,7 @@ This is a hackathon submission. For questions or collaboration:
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+Apache 2.0 License — see [LICENSE](LICENSE) for details.
 
 ---
 
