@@ -63,6 +63,7 @@ export interface Message {
   timestamp: Date;
   response?: QueryResponse;
   isLoading?: boolean;
+  isStreaming?: boolean;
 }
 
 export interface UploadedDocument {

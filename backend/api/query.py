@@ -1,27 +1,29 @@
 """
-Main Query API — POST /api/query
-The central orchestration endpoint that routes through the full UQS pipeline.
+Main Query API — now powered by the LangGraph pipeline.
+
+Endpoints:
+  POST /api/query         → full response (JSON)
+  GET  /api/query/stream  → streaming response (SSE, token-by-token if supported)
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend.cache.cache_query import check_cache
 from backend.core.auth import UserContext, get_current_user
 from backend.core.logger import AuditEvent, AuditLogger
-from backend.engines.analytical_engine import AnalyticalEngine
-from backend.engines.classifier import QueryClassifier
-from backend.engines.predictive_engine import PredictiveEngine
-from backend.engines.rag_engine import RAGEngine
-from backend.engines.rag_plus_plus import RagPlusPlusEngine
-from backend.engines.sql_engine import SQLEngine
+from backend.core.security import get_rate_limit_string, limiter, sanitize_query
+from backend.graph.pipeline import get_pipeline
 from backend.llm.context_manager import session_store
 
 router = APIRouter(prefix="/api", tags=["query"])
+
 
 # ── Request / Response Models ─────────────────────────────────────────────────
 
@@ -46,147 +48,163 @@ class QueryResponse(BaseModel):
     session_id: str
 
 
-# ── Engine singletons ─────────────────────────────────────────────────────────
-_classifier = QueryClassifier()
-_sql_engine = SQLEngine()
-_analytical_engine = AnalyticalEngine()
-_predictive_engine = PredictiveEngine()
-_rag_engine = RAGEngine()
-_rag_plus_plus_engine = RagPlusPlusEngine()
+# ── Shared pipeline helper ────────────────────────────────────────────────────
 
-
-# ── Main Query Endpoint ───────────────────────────────────────────────────────
-
-@router.post("/query", response_model=QueryResponse)
-async def query(
-    request: QueryRequest,
-    user: UserContext = Depends(get_current_user),
-) -> QueryResponse:
-    start = time.perf_counter()
-    session_id = request.session_id or str(uuid.uuid4())
+async def _run_pipeline(
+    query: str,
+    session_id: str,
+    use_case_context: str,
+    user: UserContext,
+) -> tuple[dict, float]:
+    """
+    Run the LangGraph pipeline and return (final_response_dict, latency_ms).
+    Raises HTTPException on hard failures.
+    """
+    t0 = time.perf_counter()
     audit = AuditLogger(user_id=user.user_id, role=user.role, session_id=session_id)
+    audit.log(AuditEvent.QUERY_RECEIVED, details={"query": query})
 
-    audit.log(AuditEvent.QUERY_RECEIVED, details={"query": request.query})
-
-    # ── Step 1: Get or create user session (loads role-scoped schema) ──────
     session = await session_store.get_or_create(
         user_id=user.user_id,
         role=user.role,
         email=user.email,
         session_id=session_id,
-        use_case_context=request.use_case_context,
+        use_case_context=use_case_context,
     )
 
-    # ── Step 2: Classify the query ──────────────────────────────────────────
-    classification = await _classifier.classify(session, request.query, audit)
+    initial_state = {
+        "query": query,
+        "session_id": session_id,
+        "session": session,
+        "audit": audit,
+        "user": user,
+        "retry_count": 0,
+        "cache_hit": False,
+        "relevant": True,
+        "engine_corrected": False,
+        "engine_sources": [],
+        "engine_key_metrics": [],
+        "engine_chart": None,
+        "engine_chart_type": None,
+    }
 
-    if not classification.relevant:
-        session.add_message("user", request.query)
-        session.add_message("assistant", classification.polite_rejection)
-        latency_ms = (time.perf_counter() - start) * 1000
-        return QueryResponse(
-            answer=classification.polite_rejection,
-            engine="classifier",
-            query_type="irrelevant",
-            sources=[],
-            from_cache=False,
-            latency_ms=latency_ms,
-            session_id=session_id,
-        )
+    pipeline = get_pipeline()
+    final_state = await pipeline.ainvoke(initial_state)
 
-    # ── Step 3: Check cache ─────────────────────────────────────────────────
-    cache_result = await check_cache(request.query)
-    if cache_result.cache_hit and cache_result.answer_from_cache:
-        audit.log(AuditEvent.CACHE_HIT, details={"matching_report": cache_result.matching_report})
-        latency_ms = (time.perf_counter() - start) * 1000
-        session.add_message("user", request.query)
-        session.add_message("assistant", cache_result.answer_from_cache)
-        return QueryResponse(
-            answer=cache_result.answer_from_cache,
-            engine="cache",
-            query_type=classification.type,
-            sources=[cache_result.matching_report or "cache"],
-            from_cache=True,
-            latency_ms=latency_ms,
-            session_id=session_id,
-        )
+    latency_ms = (time.perf_counter() - t0) * 1000
+    response = final_state.get("final_response")
 
-    audit.log(AuditEvent.CACHE_MISS, details={"query_type": classification.type})
-    audit.log(AuditEvent.ENGINE_ROUTED, details={"engine": classification.type})
+    if not response:
+        raise HTTPException(status_code=500, detail="Pipeline returned no response.")
 
-    # ── Step 4: Route to specialized engine ────────────────────────────────
-    query_type = classification.type
-    answer = ""
-    sources: list[str] = []
-    key_metrics: list[dict] = []
-    chart: dict | None = None
-    chart_type: str | None = None
-    corrected = False
-    model_version: int | None = None
+    # Inject real latency
+    response["latency_ms"] = round(latency_ms, 1)
 
-    if query_type == "sql":
-        result = await _sql_engine.run(session, request.query, audit)
-        answer = result.explanation
-        sources = result.sources
-        corrected = result.corrected
-        # Build chart data from rows if possible
-        if result.rows and result.columns:
-            chart = {"columns": result.columns, "rows": result.rows[:50]}
-            chart_type = "table"
-
-    elif query_type == "analytical":
-        result = await _analytical_engine.run(
-            session, request.query, sub_type=classification.sub_type, audit=audit
-        )
-        answer = result.headline + "\n\n" + result.narrative if result.headline else result.narrative
-        sources = result.sources
-        key_metrics = result.key_metrics
-        chart = result.chart_data
-        chart_type = result.chart_type
-
-    elif query_type == "predictive":
-        result = await _predictive_engine.run(session, request.query, audit)
-        answer = result.narrative
-        sources = result.sources
-        model_version = result.model_version
-        chart = {"predictions": [p.model_dump() for p in result.predictions]}
-        chart_type = "predictions"
-
-    elif query_type == "rag":
-        result = await _rag_engine.run(session, request.query, session_id, audit)
-        answer = result.answer
-        sources = result.sources_used
-
-    elif query_type == "rag++":
-        result = await _rag_plus_plus_engine.run(session, request.query, session_id, audit)
-        answer = result.answer
-        sources = result.sources_used
-
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown query type: {query_type}")
-
-    # ── Step 5: Update conversation history ────────────────────────────────
-    session.add_message("user", request.query)
-    session.add_message("assistant", answer)
-
-    latency_ms = (time.perf_counter() - start) * 1000
+    # Update conversation history
+    session.add_message("user", query)
+    session.add_message("assistant", response.get("answer", ""))
 
     audit.log(AuditEvent.ENGINE_RESPONSE, details={
-        "engine": query_type,
-        "answer_length": len(answer),
+        "engine": response.get("engine"),
+        "from_cache": response.get("from_cache"),
     }, latency_ms=latency_ms)
 
-    return QueryResponse(
-        answer=answer,
-        engine=query_type,
-        query_type=classification.sub_type or query_type,
-        sources=sources,
-        key_metrics=key_metrics,
-        chart=chart,
-        chart_type=chart_type,
-        from_cache=False,
-        corrected=corrected,
-        latency_ms=latency_ms,
-        model_version=model_version,
-        session_id=session_id,
+    return response, latency_ms
+
+
+# ── POST /api/query — full JSON response ──────────────────────────────────────
+
+@router.post("/query", response_model=QueryResponse)
+@limiter.limit(get_rate_limit_string())
+async def query(
+    request: Request,
+    body: QueryRequest,
+    user: UserContext = Depends(get_current_user),
+) -> QueryResponse:
+    """Submit a natural language query. Returns full response when complete."""
+    # Sanitize input
+    clean_query, err = sanitize_query(body.query)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    session_id = body.session_id or str(uuid.uuid4())
+    response, _ = await _run_pipeline(clean_query, session_id, body.use_case_context, user)
+    return QueryResponse(**response)
+
+
+# ── GET /api/query/stream — SSE streaming ────────────────────────────────────
+
+@router.get("/query/stream")
+@limiter.limit(get_rate_limit_string())
+async def query_stream(
+    request: Request,
+    query: str,
+    session_id: str | None = None,
+    use_case_context: str = "enterprise data analytics platform",
+    user: UserContext = Depends(get_current_user),
+) -> StreamingResponse:
+    """
+    Submit a query and receive a streaming SSE response.
+
+    SSE event format:
+      event: token          — individual answer word
+      event: metadata       — JSON with engine, sources, metrics, chart
+      event: done           — signals stream end
+      event: error          — signals an error
+    """
+    clean_query, err = sanitize_query(query)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    sid = session_id or str(uuid.uuid4())
+
+    async def event_generator():
+        try:
+            # Run the full pipeline first (LangGraph doesn't natively stream tokens
+            # from arbitrary LLM providers, so we do word-level streaming of the answer)
+            response, latency_ms = await _run_pipeline(
+                clean_query, sid, use_case_context, user
+            )
+            answer: str = response.get("answer", "")
+
+            # Stream words with small delay for visible effect
+            words = answer.split()
+            for i, word in enumerate(words):
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+                chunk = word + (" " if i < len(words) - 1 else "")
+                yield f"event: token\ndata: {json.dumps({'token': chunk})}\n\n"
+                await asyncio.sleep(0.01)  # ~100 words/sec streaming
+
+            # Send metadata after full answer streamed
+            meta = {
+                "engine": response.get("engine"),
+                "query_type": response.get("query_type"),
+                "sources": response.get("sources", []),
+                "key_metrics": response.get("key_metrics", []),
+                "chart": response.get("chart"),
+                "chart_type": response.get("chart_type"),
+                "from_cache": response.get("from_cache", False),
+                "corrected": response.get("corrected", False),
+                "latency_ms": latency_ms,
+                "model_version": response.get("model_version"),
+                "session_id": sid,
+            }
+            yield f"event: metadata\ndata: {json.dumps(meta)}\n\n"
+            yield "event: done\ndata: {}\n\n"
+
+        except HTTPException as e:
+            yield f"event: error\ndata: {json.dumps({'detail': e.detail})}\n\n"
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        },
     )

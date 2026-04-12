@@ -50,7 +50,13 @@ class Settings(BaseSettings):
     # ── API ───────────────────────────────────────────────────
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    debug: bool = True
+    debug: bool = True  # Set to False in production
+
+    # ── Security ──────────────────────────────────────────────
+    rate_limit_per_minute: int = 30
+    query_max_length: int = 1000
+    request_timeout_seconds: int = 30
+    allowed_origins: str = "http://localhost:3000,http://localhost:3001"
 
     # ── Cron ──────────────────────────────────────────────────
     cron_enabled: bool = False
