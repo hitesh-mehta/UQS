@@ -203,3 +203,8 @@ export async function flushCache(granularity?: string) {
 export async function triggerRetraining() {
   return apiFetch('/api/admin/models/retrain', { method: 'POST' });
 }
+
+// ── RBAC ──────────────────────────────────────────────────────────────────────
+export async function fetchRBACRoles(): Promise<{ roles: { role: string, desc: string, views: string[] }[] }> {
+  return apiFetch('/api/admin/roles');
+}

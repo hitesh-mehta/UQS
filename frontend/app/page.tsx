@@ -15,7 +15,7 @@ import CacheStatusPanel from '@/components/CacheStatusPanel';
 import ModelStatus from '@/components/ModelStatus';
 import {
   fetchHealth, loginToSupabase, setAuthToken, getAuthToken, clearAuthToken,
-  fetchCacheStatus, fetchModelRegistry,
+  fetchCacheStatus, fetchModelRegistry, fetchRBACRoles,
 } from '@/lib/api';
 import type { CacheStatus, ModelRegistryEntry, UploadedDocument } from '@/lib/types';
 
@@ -37,13 +37,7 @@ const ENGINE_CARDS = [
   { id: 'cache2', name: 'Cache Layer',       color: '#f43f5e', icon: Zap,        desc: '4-granularity FIFO (hourly/daily/weekly/monthly), LLM hit detection' },
 ];
 
-const RBAC_ROLES = [
-  { role: 'admin',            views: ['*'],                          desc: 'Full schema access — all tables & columns' },
-  { role: 'analyst',          views: ['analyst_sales_view', 'analyst_kpi_view'],          desc: 'Aggregated views only, no row-level data or PII' },
-  { role: 'regional_manager', views: ['rm_sales_view', 'rm_customer_view'],               desc: 'Region-filtered, no PII columns' },
-  { role: 'auditor',          views: ['audit_trail_view'],           desc: 'Audit trail tables only' },
-  { role: 'viewer',           views: ['dashboard_summary_view'],     desc: 'Summary dashboards only' },
-];
+
 
 // ── Connection status pill ─────────────────────────────────────────────────────
 function StatusPill({ status, model }: { status: 'connected' | 'error' | 'loading'; model?: string }) {
@@ -218,6 +212,7 @@ export default function Home() {
   const [healthStatus, setHealthStatus] = useState<'loading' | 'connected' | 'error'>('loading');
   const [cacheData, setCacheData] = useState<CacheStatus | null>(null);
   const [modelData, setModelData] = useState<Record<string, ModelRegistryEntry> | null>(null);
+  const [rbacRoles, setRbacRoles] = useState<{ role: string, desc: string, views: string[] }[] | null>(null);
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
 
@@ -275,11 +270,19 @@ export default function Home() {
     } catch {}
   }, []);
 
+  const loadRBACRoles = useCallback(async () => {
+    try {
+      const data = await fetchRBACRoles();
+      setRbacRoles(data.roles);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     if (!isAuthed) return;
     if (activeTab === 'cache') loadCacheData();
     if (activeTab === 'models') loadModelData();
-  }, [activeTab, isAuthed, loadCacheData, loadModelData]);
+    if (activeTab === 'rbac') loadRBACRoles();
+  }, [activeTab, isAuthed, loadCacheData, loadModelData, loadRBACRoles]);
 
   if (checkingAuth) return null;
 
@@ -589,22 +592,37 @@ export default function Home() {
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {RBAC_ROLES.map(({ role, views, desc }) => (
-                      <div key={role} className="glass" style={{ padding: '16px 18px', borderRadius: 'var(--radius-md)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                          <Shield size={15} style={{ color: 'var(--accent-primary)' }} />
-                          <span style={{ fontSize: 14, fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', color: '#818cf8' }}>
-                            {role}
-                          </span>
+                    {rbacRoles ? (
+                      rbacRoles.length > 0 ? (
+                        rbacRoles.map(({ role, views, desc }) => (
+                          <div key={role} className="glass" style={{ padding: '16px 18px', borderRadius: 'var(--radius-md)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                              <Shield size={15} style={{ color: 'var(--accent-primary)' }} />
+                              <span style={{ fontSize: 14, fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', color: '#818cf8' }}>
+                                {role}
+                              </span>
+                            </div>
+                            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>{desc}</p>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                              {views.length > 0 ? views.map((v) => (
+                                <span key={v} className="source-chip" style={{ fontSize: 10 }}>{v}</span>
+                              )) : (
+                                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(No views assigned)</span>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                          No roles found in the database. Please run the database initialisation script.
                         </div>
-                        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>{desc}</p>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                          {views.map((v) => (
-                            <span key={v} className="source-chip" style={{ fontSize: 10 }}>{v}</span>
-                          ))}
-                        </div>
+                      )
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-muted)', fontSize: 13 }}>
+                        <Loader2 size={16} className="animate-spin" />
+                        Fetching dynamic roles from Supabase...
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
               </div>

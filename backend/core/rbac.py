@@ -79,26 +79,36 @@ async def get_role_views(role: str) -> list[str]:
 
 async def get_all_roles() -> list[dict]:
     """
-    Returns all roles defined in uqs_roles table.
+    Returns all roles defined in uqs_roles table, along with their permitted views.
     Used by the frontend auth modal to show available roles dynamically.
     """
     try:
         async with get_db_session() as session:
             result = await session.execute(
-                text("SELECT name, description FROM uqs_roles ORDER BY name;")
+                text("""
+                    SELECT 
+                        r.name, 
+                        r.description,
+                        COALESCE(ARRAY_AGG(p.view_name) FILTER (WHERE p.view_name IS NOT NULL), '{}') as views
+                    FROM uqs_roles r
+                    LEFT JOIN uqs_role_permissions p ON r.name = p.role_name
+                    GROUP BY r.name, r.description
+                    ORDER BY r.name;
+                """)
             )
             rows = result.fetchall()
-        return [{"name": row[0], "description": row[1] or ""} for row in rows]
+        return [
+            {
+                "role": row[0],
+                "desc": row[1] or "",
+                "views": list(row[2]) if row[2] else []
+            }
+            for row in rows
+        ]
     except Exception as exc:
         log.error(f"Failed to fetch roles from DB: {exc}")
-        # Return sensible defaults so the UI doesn't break
-        return [
-            {"name": "admin",            "description": "Full schema access"},
-            {"name": "analyst",          "description": "Aggregated views only"},
-            {"name": "regional_manager", "description": "Region-filtered views"},
-            {"name": "auditor",          "description": "Audit trail only"},
-            {"name": "viewer",           "description": "Summary dashboards"},
-        ]
+        # Return sensible defaults so the UI doesn't break entirely if DB is empty
+        return []
 
 
 # ── Schema loader ─────────────────────────────────────────────────────────────
