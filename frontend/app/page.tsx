@@ -7,14 +7,14 @@ import {
   Zap, LayoutGrid, Settings, ChevronLeft,
   ChevronRight, Layers, Shield, Activity, Info,
   Key, CheckCircle, AlertCircle, Loader2,
-  Sun, Moon
+  Sun, Moon, Lock, Mail, LogOut
 } from 'lucide-react';
 
 import ChatInterface from '@/components/ChatInterface';
 import CacheStatusPanel from '@/components/CacheStatusPanel';
 import ModelStatus from '@/components/ModelStatus';
 import {
-  fetchHealth, fetchDevToken, setAuthToken, getAuthToken,
+  fetchHealth, fetchDevToken, setAuthToken, getAuthToken, clearAuthToken,
   fetchCacheStatus, fetchModelRegistry,
 } from '@/lib/api';
 import type { CacheStatus, ModelRegistryEntry, UploadedDocument } from '@/lib/types';
@@ -70,17 +70,37 @@ function StatusPill({ status, model }: { status: 'connected' | 'error' | 'loadin
 function AuthModal({ onDone }: { onDone: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [role, setRole] = useState('analyst');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
-  const handleDevLogin = async () => {
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!email || !password) {
+      setError('Please enter both email and password.');
+      return;
+    }
+    
     setLoading(true);
     setError('');
     try {
-      const token = await fetchDevToken(role);
+      // Derive dev role from email for demo
+      let selectedRole = 'viewer';
+      const eml = email.toLowerCase();
+      if (eml.includes('admin')) selectedRole = 'admin';
+      else if (eml.includes('analyst')) selectedRole = 'analyst';
+      else if (eml.includes('manager')) selectedRole = 'regional_manager';
+      else if (eml.includes('audit')) selectedRole = 'auditor';
+
+      // Spoofing the password validation for the Hackathon Demo UI feel
+      if (password !== 'UQS@Natwest.com') {
+         throw new Error("Invalid credentials. Hint: use project DB password.");
+      }
+
+      const token = await fetchDevToken(selectedRole);
       setAuthToken(token);
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to get token. Is the backend running?');
+      setError(e instanceof Error ? e.message : 'Invalid credentials or backend offline.');
     } finally {
       setLoading(false);
     }
@@ -89,79 +109,95 @@ function AuthModal({ onDone }: { onDone: () => void }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 100,
-      background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(12px)',
+      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(24px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
     }}>
-      <div className="glass-bright" style={{
-        borderRadius: 'var(--radius-xl)', padding: 40, maxWidth: 440, width: '100%',
-        boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+      <div className="glass-bright fade-in-up" style={{
+        borderRadius: 'var(--radius-xl)', padding: "48px 40px", maxWidth: 420, width: '100%',
+        boxShadow: 'var(--shadow-sm)',
       }}>
-        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{
-            width: 60, height: 60, borderRadius: 20,
-            background: 'linear-gradient(135deg, var(--border-subtle), var(--border-strong))',
-            border: '1px solid var(--border-strong)',
+            width: 64, height: 64, borderRadius: 20,
+            background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 16px',
+            margin: '0 auto 20px',
+            boxShadow: 'var(--glow-sm)',
           }}>
-            <Key size={28} style={{ color: '#818cf8' }} />
+            <Lock size={28} style={{ color: '#fff' }} />
           </div>
-          <h1 className="gradient-text" style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
-            Universal Query Solver
+          <h1 className="gradient-text" style={{ fontSize: 24, fontWeight: 700, marginBottom: 8, letterSpacing: '-0.02em' }}>
+            Welcome Back
           </h1>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            Development mode — connect to your local backend to get started.
+          <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>
+            Sign in to the Universal Query Solver
           </p>
         </div>
 
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-            Login as role (dev only)
-          </label>
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            style={{
-              width: '100%', background: 'var(--bg-surface)', border: '1.5px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)', padding: '10px 14px', color: 'var(--text-primary)',
-              fontSize: 14, fontFamily: 'Inter, sans-serif', outline: 'none',
-            }}
-          >
-            <option value="admin">Admin</option>
-            <option value="analyst">Analyst</option>
-            <option value="regional_manager">Regional Manager</option>
-            <option value="auditor">Auditor</option>
-            <option value="viewer">Viewer</option>
-          </select>
-        </div>
-
-        {error && (
-          <div style={{
-            marginBottom: 14, padding: '10px 14px',
-            background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.25)',
-            borderRadius: 'var(--radius-sm)', fontSize: 12, color: '#fda4af',
-            display: 'flex', gap: 8, alignItems: 'flex-start',
-          }}>
-            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-            {error}
+        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'block', marginBottom: 6, fontWeight: 500 }}>
+              Email Address
+            </label>
+            <div style={{ position: 'relative' }}>
+              <Mail size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="admin@natwest.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoFocus
+                className="uqs-input"
+                style={{ width: '100%', padding: '12px 14px 12px 42px' }}
+              />
+            </div>
           </div>
-        )}
 
-        <button
-          className="btn-primary"
-          style={{ width: '100%', padding: '12px 20px', fontSize: 15 }}
-          onClick={handleDevLogin}
-          disabled={loading}
-        >
-          {loading ? (
-            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              <Loader2 size={16} className="animate-spin" /> Connecting…
-            </span>
-          ) : 'Connect & Enter →'}
-        </button>
+          <div>
+            <label style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'block', marginBottom: 6, fontWeight: 500 }}>
+              Password
+            </label>
+            <div style={{ position: 'relative' }}>
+              <Key size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="uqs-input"
+                style={{ width: '100%', padding: '12px 14px 12px 42px' }}
+              />
+            </div>
+          </div>
 
-        <p style={{ textAlign: 'center', marginTop: 16, fontSize: 11, color: 'var(--text-muted)' }}>
-          Make sure <code style={{ color: '#818cf8' }}>uvicorn backend.main:app</code> is running on port 8000
+          {error && (
+            <div className="fade-in-up" style={{
+              marginTop: 4, padding: '10px 14px',
+              background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.25)',
+              borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--accent-rose)',
+              display: 'flex', gap: 8, alignItems: 'center',
+            }}>
+              <AlertCircle size={15} style={{ flexShrink: 0 }} />
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            className="btn-primary"
+            style={{ width: '100%', padding: '14px 20px', fontSize: 15, marginTop: 8 }}
+            disabled={loading}
+          >
+            {loading ? (
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <Loader2 size={18} className="animate-spin" /> Authenticating…
+              </span>
+            ) : 'Sign In'}
+          </button>
+        </form>
+
+        <p style={{ textAlign: 'center', marginTop: 24, fontSize: 12, color: 'var(--text-muted)' }}>
+          Hackathon Hint: Any email with <strong style={{color: 'var(--text-primary)'}}>admin</strong>/<strong style={{color: 'var(--text-primary)'}}>analyst</strong> and db password.
         </p>
       </div>
     </div>
@@ -376,6 +412,17 @@ export default function Home() {
                 title="Toggle Theme"
               >
                 {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+              </button>
+              <div style={{ width: 1, height: 24, background: 'var(--border-subtle)', margin: '0 4px' }} />
+              <button
+                className="btn-icon"
+                onClick={() => {
+                  clearAuthToken();
+                  setIsAuthed(false);
+                }}
+                title="Log Out"
+              >
+                <LogOut size={15} />
               </button>
             </div>
           </div>
