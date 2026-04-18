@@ -14,22 +14,6 @@ services:
     networks:
       - uqs-net
 
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    container_name: uqs-frontend
-    ports:
-      - "3000:3000"
-    environment:
-      # If deploying on AWS, you might want this to point to the EC2 Public IP or proxy address
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-    depends_on:
-      - backend
-    restart: unless-stopped
-    networks:
-      - uqs-net
-
 networks:
   uqs-net:
     driver: bridge
