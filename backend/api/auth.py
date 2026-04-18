@@ -45,6 +45,8 @@ async def login(credentials: LoginRequest):
             payload = resp.json()
             if "error_description" in payload:
                 error_msg = payload["error_description"]
+            elif "msg" in payload:
+                error_msg = payload["msg"]
         except Exception:
             pass
         raise HTTPException(
