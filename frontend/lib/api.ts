@@ -45,10 +45,11 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return res.json() as Promise<T>;
 }
 
-// ── Dev token ─────────────────────────────────────────────────────────────────
-export async function fetchDevToken(role = 'analyst'): Promise<string> {
-  const data = await apiFetch<{ access_token: string }>(`/dev/token?role=${role}`, {
+// ── Login ───────────────────────────────────────────────────────────────────
+export async function loginToSupabase(email: string, password: string): Promise<string> {
+  const data = await apiFetch<{ access_token: string }>(`/api/auth/login`, {
     method: 'POST',
+    body: JSON.stringify({ email, password }),
   });
   return data.access_token;
 }

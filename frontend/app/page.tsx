@@ -14,7 +14,7 @@ import ChatInterface from '@/components/ChatInterface';
 import CacheStatusPanel from '@/components/CacheStatusPanel';
 import ModelStatus from '@/components/ModelStatus';
 import {
-  fetchHealth, fetchDevToken, setAuthToken, getAuthToken, clearAuthToken,
+  fetchHealth, loginToSupabase, setAuthToken, getAuthToken, clearAuthToken,
   fetchCacheStatus, fetchModelRegistry,
 } from '@/lib/api';
 import type { CacheStatus, ModelRegistryEntry, UploadedDocument } from '@/lib/types';
@@ -85,24 +85,9 @@ function AuthModal({ onDone }: { onDone: () => void }) {
     setError('');
     try {
       // Real authentication against the backend login endpoint
-      // which will verify against Supabase Auth!
-      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') + '/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-      
-      if (!res.ok) {
-        let msg = 'Invalid credentials';
-        try {
-           const errData = await res.json();
-           msg = errData.detail || msg;
-        } catch(e) {}
-        throw new Error(msg);
-      }
-      
-      const data = await res.json();
-      setAuthToken(data.access_token);
+      // which uses `apiFetch` under the hood to ensure it respects Vercel proxy
+      const token = await loginToSupabase(email, password);
+      setAuthToken(token);
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Invalid credentials or backend offline.');
