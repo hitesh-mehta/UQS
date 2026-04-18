@@ -45,7 +45,11 @@ def get_engine() -> AsyncEngine:
 
         _engine = create_async_engine(
             db_url,
-            connect_args={"ssl": ssl_ctx},
+            connect_args={
+                "ssl": ssl_ctx,
+                "prepared_statement_cache_size": 0,
+                "statement_cache_size": 0,
+            },
             echo=settings.debug,
             pool_pre_ping=True,
             pool_size=5,

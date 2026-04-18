@@ -7,6 +7,7 @@ import {
   Zap, LayoutGrid, Settings, ChevronLeft,
   ChevronRight, Layers, Shield, Activity, Info,
   Key, CheckCircle, AlertCircle, Loader2,
+  Sun, Moon
 } from 'lucide-react';
 
 import ChatInterface from '@/components/ChatInterface';
@@ -88,7 +89,7 @@ function AuthModal({ onDone }: { onDone: () => void }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 100,
-      background: 'rgba(5,5,16,0.85)', backdropFilter: 'blur(12px)',
+      background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(12px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
     }}>
       <div className="glass-bright" style={{
@@ -98,8 +99,8 @@ function AuthModal({ onDone }: { onDone: () => void }) {
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div style={{
             width: 60, height: 60, borderRadius: 20,
-            background: 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(139,92,246,0.3))',
-            border: '1px solid rgba(99,102,241,0.3)',
+            background: 'linear-gradient(135deg, var(--border-subtle), var(--border-strong))',
+            border: '1px solid var(--border-strong)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             margin: '0 auto 16px',
           }}>
@@ -121,7 +122,7 @@ function AuthModal({ onDone }: { onDone: () => void }) {
             value={role}
             onChange={(e) => setRole(e.target.value)}
             style={{
-              width: '100%', background: 'rgba(5,5,20,0.8)', border: '1.5px solid var(--border-subtle)',
+              width: '100%', background: 'var(--bg-surface)', border: '1.5px solid var(--border-subtle)',
               borderRadius: 'var(--radius-md)', padding: '10px 14px', color: 'var(--text-primary)',
               fontSize: 14, fontFamily: 'Inter, sans-serif', outline: 'none',
             }}
@@ -180,6 +181,22 @@ export default function Home() {
   const [cacheData, setCacheData] = useState<CacheStatus | null>(null);
   const [modelData, setModelData] = useState<Record<string, ModelRegistryEntry> | null>(null);
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>([]);
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+
+  // ── Handle Theme ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    const saved = localStorage.getItem('uqs-theme') || 'dark';
+    setTheme(saved as 'light' | 'dark');
+  }, []);
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    localStorage.setItem('uqs-theme', theme);
+  }, [theme]);
 
   // ── Check auth on mount ────────────────────────────────────────────────────
   useEffect(() => {
@@ -245,13 +262,9 @@ export default function Home() {
         display: 'flex', height: '100vh', position: 'relative', zIndex: 1, overflow: 'hidden',
       }}>
         {/* ── Left Sidebar ─────────────────────────────────────────────────── */}
-        <div style={{
+        <div className="layout-sidebar" style={{
           width: sidebarOpen ? 220 : 64,
-          transition: 'width 0.25s ease',
           flexShrink: 0,
-          background: 'rgba(5,5,20,0.7)',
-          backdropFilter: 'blur(20px)',
-          borderRight: '1px solid var(--border-subtle)',
           display: 'flex', flexDirection: 'column',
           overflow: 'hidden',
         }}>
@@ -264,9 +277,9 @@ export default function Home() {
           }}>
             <div style={{
               width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+              background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 0 20px rgba(99,102,241,0.4)',
+              boxShadow: 'var(--glow-sm)',
             }}>
               <Sparkles size={18} style={{ color: 'white' }} />
             </div>
@@ -325,13 +338,10 @@ export default function Home() {
         {/* ── Main Content ───────────────────────────────────────────────────── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Top bar */}
-          <div style={{
+          <div className="layout-header" style={{
             height: 56, flexShrink: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '0 20px',
-            borderBottom: '1px solid var(--border-subtle)',
-            background: 'rgba(5,5,20,0.5)',
-            backdropFilter: 'blur(12px)',
           }}>
             <div>
               <h1 style={{ fontSize: 15, fontWeight: 600 }}>
@@ -360,6 +370,13 @@ export default function Home() {
                   {rightOpen ? 'Hide Panel' : 'Show Panel'}
                 </button>
               )}
+              <button
+                className="btn-icon"
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                title="Toggle Theme"
+              >
+                {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+              </button>
             </div>
           </div>
 
@@ -376,11 +393,8 @@ export default function Home() {
                 </div>
                 {/* Right panel */}
                 {rightOpen && (
-                  <div style={{
+                  <div className="layout-panel-right" style={{
                     width: 300, flexShrink: 0,
-                    borderLeft: '1px solid var(--border-subtle)',
-                    background: 'rgba(5,5,20,0.6)',
-                    backdropFilter: 'blur(16px)',
                     padding: 16,
                     overflow: 'auto',
                     display: 'flex', flexDirection: 'column', gap: 16,
@@ -394,7 +408,7 @@ export default function Home() {
                         {uploadedDocs.map((doc, i) => (
                           <div key={i} style={{
                             padding: '8px 10px', marginBottom: 6,
-                            background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.2)',
+                            background: 'var(--border-subtle)', border: '1px solid var(--border-strong)',
                             borderRadius: 'var(--radius-sm)',
                           }}>
                             <div style={{ fontSize: 12, color: 'var(--text-primary)', marginBottom: 3 }}>{doc.filename}</div>
@@ -416,7 +430,7 @@ export default function Home() {
                       ].map(({ label, desc, color }) => (
                         <div key={label} style={{
                           padding: '8px 10px', marginBottom: 6,
-                          background: 'rgba(5,5,20,0.5)', borderRadius: 'var(--radius-sm)',
+                          background: 'var(--bg-surface)', borderRadius: 'var(--radius-sm)',
                           border: '1px solid var(--border-subtle)',
                           display: 'flex', gap: 10, alignItems: 'flex-start',
                         }}>
@@ -515,7 +529,7 @@ export default function Home() {
                 <div style={{ maxWidth: 700 }}>
                   <div style={{
                     marginBottom: 20, padding: '14px 16px',
-                    background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)',
+                    background: 'var(--border-subtle)', border: '1px solid var(--border-strong)',
                     borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6,
                     display: 'flex', gap: 10,
                   }}>

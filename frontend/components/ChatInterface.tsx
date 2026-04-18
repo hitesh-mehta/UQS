@@ -32,11 +32,11 @@ function EmptyState({ onExample }: { onExample: (q: string) => void }) {
       <div style={{ textAlign: 'center' }}>
         <div style={{
           width: 72, height: 72, borderRadius: 24,
-          background: 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.25))',
-          border: '1px solid rgba(99,102,241,0.3)',
+          background: 'linear-gradient(135deg, var(--border-subtle), var(--border-strong))',
+          border: '1px solid var(--border-strong)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           margin: '0 auto 20px',
-          boxShadow: '0 0 40px rgba(99,102,241,0.2)',
+          boxShadow: 'var(--glow-sm)',
         }}>
           <Sparkles size={32} style={{ color: '#818cf8' }} />
         </div>
@@ -56,20 +56,20 @@ function EmptyState({ onExample }: { onExample: (q: string) => void }) {
               key={q}
               onClick={() => onExample(q)}
               style={{
-                background: 'rgba(13,13,43,0.6)', border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-glass)', border: '1px solid var(--border-subtle)',
                 borderRadius: 'var(--radius-md)', padding: '14px 18px', cursor: 'pointer', /* Fitts's Law: Larger padding for easier click */
                 textAlign: 'left', transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)', /* Smooth ease for feedback */
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
               }}
               onMouseEnter={(e) => {
                 (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-primary)';
-                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.1)';
+                (e.currentTarget as HTMLButtonElement).style.background = 'var(--border-subtle)';
                 (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)';
-                (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 16px rgba(99,102,241,0.15)';
+                (e.currentTarget as HTMLButtonElement).style.boxShadow = 'var(--shadow-sm)';
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-subtle)';
-                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(13,13,43,0.6)';
+                (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-glass)';
                 (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
                 (e.currentTarget as HTMLButtonElement).style.boxShadow = 'none';
               }}
@@ -219,9 +219,9 @@ export default function ChatInterface({ sessionId, onDocumentUploaded }: Props) 
                 <div style={{
                   width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
                   background: msg.role === 'user'
-                    ? 'linear-gradient(135deg, #6366f1, #8b5cf6)'
-                    : 'rgba(99,102,241,0.12)',
-                  border: '1px solid rgba(99,102,241,0.25)',
+                    ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))'
+                    : 'var(--border-subtle)',
+                  border: '1px solid var(--border-strong)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   {msg.role === 'user'
@@ -290,16 +290,16 @@ export default function ChatInterface({ sessionId, onDocumentUploaded }: Props) 
       }}>
         <div style={{
           display: 'flex', alignItems: 'flex-end', gap: 10,
-          background: 'rgba(13,13,43,0.92)', border: '1.5px solid var(--border-subtle)',
+          background: 'var(--bg-glass-heavy)', border: '1.5px solid var(--border-subtle)',
           borderRadius: 'var(--radius-xl)', padding: '8px 8px 8px 16px',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.4)', backdropFilter: 'blur(20px)',
+          boxShadow: 'var(--shadow-sm)', backdropFilter: 'blur(20px)',
           transition: 'border-color 0.25s ease, box-shadow 0.25s ease',
         }} onFocus={(e) => {
           e.currentTarget.style.borderColor = 'var(--accent-primary)';
-          e.currentTarget.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.15), 0 8px 32px rgba(0,0,0,0.4)';
+          e.currentTarget.style.boxShadow = '0 0 0 3px var(--border-subtle), var(--shadow-sm)';
         }} onBlur={(e) => {
           e.currentTarget.style.borderColor = 'var(--border-subtle)';
-          e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4)';
+          e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
         }}>
           <button
             className="btn-ghost"
