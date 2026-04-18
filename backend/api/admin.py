@@ -9,8 +9,9 @@ from pydantic import BaseModel
 
 from backend.cache.cache_manager import Granularity, cache_manager
 from backend.cache.cron_generator import generate_report
-from backend.core.auth import UserContext, require_admin
+from backend.core.auth import UserContext, get_current_user, require_admin
 from backend.core.logger import AuditEvent, AuditLogger
+from backend.core.rbac import get_all_roles, invalidate_schema_cache
 from backend.models.continual_learning import run_all_retraining
 from backend.models.registry import model_registry
 
@@ -47,10 +48,7 @@ async def rollback_model(
     to_version: int,
     admin: UserContext = Depends(require_admin),
 ) -> dict:
-    """
-    Roll back a model target to a specific version.
-    This deletes all model versions and datasets AFTER to_version.
-    """
+    """Roll back a model target to a specific version."""
     audit = AuditLogger(user_id=admin.user_id, role=admin.role)
     result = model_registry.rollback(target=target, to_version=to_version, admin_only=True)
     audit.log(AuditEvent.MODEL_ROLLBACK, details=result)
@@ -66,8 +64,6 @@ async def trigger_retraining(
     return {"results": results, "targets_retrained": len(results)}
 
 
-# ── Model API ─────────────────────────────────────────────────────────────────
-
 @router.get("/models/registry")
 async def get_model_registry(
     admin: UserContext = Depends(require_admin),
@@ -76,8 +72,7 @@ async def get_model_registry(
     return model_registry.get_registry_summary()
 
 
-# ── Cache Status (readable by all authenticated users) ────────────────────────
-from backend.core.auth import get_current_user
+# ── Cache Status ──────────────────────────────────────────────────────────────
 
 @router.get("/cache/status")
 async def get_cache_status(
@@ -88,3 +83,35 @@ async def get_cache_status(
         "reports": cache_manager.list_reports(),
         "summaries": cache_manager.get_all_summaries(),
     }
+
+
+# ── Dynamic RBAC Management ───────────────────────────────────────────────────
+
+@router.get("/roles")
+async def list_roles(
+    user: UserContext = Depends(get_current_user),
+) -> dict:
+    """
+    Fetch all roles defined in uqs_roles (Supabase DB).
+    Used by the frontend auth modal to show available roles dynamically.
+    No admin required — all authenticated users can query available roles.
+    """
+    roles = await get_all_roles()
+    return {"roles": roles}
+
+
+@router.post("/roles/cache/invalidate")
+async def invalidate_rbac_cache(
+    role: str | None = None,
+    admin: UserContext = Depends(require_admin),
+) -> dict:
+    """
+    Flush the in-memory RBAC cache after adding/removing role permissions.
+    Call this after modifying uqs_role_permissions in Supabase.
+    """
+    invalidate_schema_cache(role)
+    return {
+        "message": f"RBAC cache invalidated for role: {role or 'ALL'}",
+        "note": "New permissions will be fetched from DB on next request.",
+    }
+

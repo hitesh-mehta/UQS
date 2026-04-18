@@ -57,21 +57,25 @@ function EmptyState({ onExample }: { onExample: (q: string) => void }) {
               onClick={() => onExample(q)}
               style={{
                 background: 'rgba(13,13,43,0.6)', border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-md)', padding: '10px 14px', cursor: 'pointer',
-                textAlign: 'left', transition: 'all 0.15s ease',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                borderRadius: 'var(--radius-md)', padding: '14px 18px', cursor: 'pointer', /* Fitts's Law: Larger padding for easier click */
+                textAlign: 'left', transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)', /* Smooth ease for feedback */
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(99,102,241,0.4)';
-                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.08)';
+                (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-primary)';
+                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.1)';
+                (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)';
+                (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 16px rgba(99,102,241,0.15)';
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-subtle)';
                 (e.currentTarget as HTMLButtonElement).style.background = 'rgba(13,13,43,0.6)';
+                (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
+                (e.currentTarget as HTMLButtonElement).style.boxShadow = 'none';
               }}
             >
-              <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>{q}</span>
-              <ChevronRight size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+              <span style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.4, fontWeight: 500 }}>{q}</span>
+              <ChevronRight size={14} style={{ color: 'var(--accent-primary)', flexShrink: 0, opacity: 0.8 }} />
             </button>
           ))}
         </div>
@@ -281,23 +285,30 @@ export default function ChatInterface({ sessionId, onDocumentUploaded }: Props) 
 
       {/* Input bar */}
       <div style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0, padding: '10px 16px',
-        background: 'linear-gradient(to top, var(--bg-base) 75%, transparent)',
+        position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px 20px',
+        background: 'linear-gradient(to top, var(--bg-base) 80%, transparent)',
       }}>
         <div style={{
-          display: 'flex', alignItems: 'flex-end', gap: 8,
+          display: 'flex', alignItems: 'flex-end', gap: 10,
           background: 'rgba(13,13,43,0.92)', border: '1.5px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-xl)', padding: '8px 8px 8px 14px',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.35)', backdropFilter: 'blur(20px)',
-          transition: 'border-color 0.2s ease',
+          borderRadius: 'var(--radius-xl)', padding: '8px 8px 8px 16px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.4)', backdropFilter: 'blur(20px)',
+          transition: 'border-color 0.25s ease, box-shadow 0.25s ease',
+        }} onFocus={(e) => {
+          e.currentTarget.style.borderColor = 'var(--accent-primary)';
+          e.currentTarget.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.15), 0 8px 32px rgba(0,0,0,0.4)';
+        }} onBlur={(e) => {
+          e.currentTarget.style.borderColor = 'var(--border-subtle)';
+          e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4)';
         }}>
           <button
             className="btn-ghost"
-            style={{ padding: 8, borderRadius: '50%', border: 'none', flexShrink: 0 }}
+            style={{ padding: 12, borderRadius: '50%', border: 'none', flexShrink: 0, transition: 'all 0.2s', cursor: 'pointer' }}
             onClick={() => setShowUpload(!showUpload)}
             title="Upload document for RAG"
+            aria-label="Upload document"
           >
-            <Upload size={16} style={{ color: showUpload ? 'var(--accent-primary)' : 'var(--text-muted)' }} />
+            <Upload size={18} style={{ color: showUpload ? 'var(--accent-primary)' : 'var(--text-muted)' }} />
           </button>
 
           <textarea
@@ -312,29 +323,32 @@ export default function ChatInterface({ sessionId, onDocumentUploaded }: Props) 
             rows={1}
             style={{
               flex: 1, background: 'transparent', border: 'none', outline: 'none',
-              resize: 'none', color: 'var(--text-primary)', fontSize: 14,
+              resize: 'none', color: 'var(--text-primary)', fontSize: 15, /* Better readability */
               lineHeight: 1.6, fontFamily: 'Inter, sans-serif',
-              paddingTop: 6, paddingBottom: 6, maxHeight: 160, overflowY: 'auto',
+              paddingTop: 10, paddingBottom: 10, maxHeight: 160, overflowY: 'auto',
             }}
           />
 
           {isStreaming ? (
             <button
               className="btn-ghost"
-              style={{ width: 40, height: 40, borderRadius: '50%', border: '1px solid var(--accent-rose)', padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ width: 44, height: 44, borderRadius: '50%', border: '1px solid var(--accent-rose)', padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
               onClick={stopStreaming}
               title="Stop generation"
+              aria-label="Stop generating"
             >
-              <StopCircle size={16} style={{ color: 'var(--accent-rose)' }} />
+              <StopCircle size={18} style={{ color: 'var(--accent-rose)' }} />
             </button>
           ) : (
             <button
               className="btn-primary"
-              style={{ width: 40, height: 40, borderRadius: '50%', padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ width: 44, height: 44, borderRadius: '22px', padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               disabled={!input.trim()}
               onClick={() => submit(input)}
+              title="Send query"
+              aria-label="Send query"
             >
-              <Send size={15} />
+              <Send size={18} style={{ marginLeft: input.trim() ? 2 : 0, transition: 'all 0.2s' }} />
             </button>
           )}
         </div>

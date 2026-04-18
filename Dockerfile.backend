@@ -1,0 +1,30 @@
+# Dockerfile.backend
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Set env variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends gcc python3-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install python dependencies from the backend folder
+# We copy it this way to leverage Docker layer caching
+COPY backend/requirements.txt ./
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy project files from root
+COPY backend/ ./backend/
+COPY scripts/ ./scripts/
+
+# Expose port
+EXPOSE 8000
+
+# Run uvicorn on 0.0.0.0 to securely expose the IP on the Docker network
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--forwarded-allow-ips", "*"]

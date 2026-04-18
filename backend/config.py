@@ -19,9 +19,12 @@ class Settings(BaseSettings):
     database_url: str = ""
 
     # ── LLM ───────────────────────────────────────────────────
-    llm_provider: Literal["ollama", "openai", "anthropic", "google"] = "ollama"
-    llm_model: str = "gemma2:2b"
-    llm_base_url: str = "http://localhost:11434"
+    # Hackathon default: Google Gemini 2.0 Flash (free tier, no GPU needed)
+    # Switch by setting LLM_PROVIDER=ollama|openai|anthropic
+    llm_provider: Literal["ollama", "openai", "anthropic", "google"] = "google"
+    llm_model: str = "gemini-2.0-flash"   # or: gemma2:2b, gpt-4o, claude-3-haiku
+    llm_base_url: str = "http://localhost:11434"  # Ollama only
+    google_api_key: str = ""              # Google AI Studio API key
     openai_api_key: str = ""
     anthropic_api_key: str = ""
 

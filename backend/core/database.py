@@ -10,6 +10,7 @@ from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+import ssl
 from supabase import Client, create_client
 
 from backend.config import settings
@@ -28,8 +29,23 @@ def get_engine() -> AsyncEngine:
             raise RuntimeError(
                 "DATABASE_URL is not set. Add it to your .env file."
             )
+        
+        db_url = settings.database_url
+        if db_url.startswith("postgresql://"):
+            db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        
+        # Supavisor (Supabase Pooler) + asyncpg requires SNI.
+        # We strip ssl from URL and apply a native SSL context.
+        if "?" in db_url:
+            db_url = db_url.split("?")[0]
+
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+
         _engine = create_async_engine(
-            settings.database_url,
+            db_url,
+            connect_args={"ssl": ssl_ctx},
             echo=settings.debug,
             pool_pre_ping=True,
             pool_size=5,

@@ -187,12 +187,19 @@ body {
 }
 
 .btn-primary:active:not(:disabled) {
-  transform: translateY(0);
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.25);
 }
 
 .btn-primary:disabled {
-  opacity: 0.4;
+  opacity: 0.5;
   cursor: not-allowed;
+  filter: grayscale(0.5);
+}
+
+.btn-primary:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 
 .btn-ghost {
@@ -203,13 +210,23 @@ body {
   cursor: pointer;
   font-family: 'Inter', sans-serif;
   font-size: 13px;
-  transition: all 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .btn-ghost:hover {
   border-color: var(--accent-primary);
   color: var(--text-primary);
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(99, 102, 241, 0.12); /* Brighter for clear affordance */
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.1);
+}
+
+.btn-ghost:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.btn-ghost:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 
 /* ── Engine Badge ───────────────────────────────────────────────────────────── */
@@ -346,15 +363,18 @@ body {
 }
 
 .sidebar-item:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(99, 102, 241, 0.12);
   color: var(--text-primary);
-  border-color: var(--border-subtle);
+  border-color: rgba(99, 102, 241, 0.3);
+  transform: translateX(2px); /* Clear interaction feedback */
 }
 
 .sidebar-item.active {
-  background: rgba(99, 102, 241, 0.15);
+  background: rgba(99, 102, 241, 0.18);
   color: #818cf8;
-  border-color: rgba(99, 102, 241, 0.3);
+  border-color: rgba(99, 102, 241, 0.4);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0px var(--accent-primary);
 }
 
 /* ── Shimmer loading ────────────────────────────────────────────────────────── */

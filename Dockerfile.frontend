@@ -1,0 +1,22 @@
+# Dockerfile.frontend
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package configurations
+COPY frontend/package.json frontend/package-lock.json* ./
+
+# Install dependencies cleanly
+RUN npm ci
+
+# Copy the frontend source code
+COPY frontend/ ./
+
+# Build Next.js
+RUN npm run build
+
+# Start the Next.js process directly
+EXPOSE 3000
+ENV PORT=3000
+
+CMD ["npm", "start"]

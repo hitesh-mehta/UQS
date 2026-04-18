@@ -1,158 +1,148 @@
 """
-Database Initialization Script.
-Run once at project setup:
-  python -m scripts.init_db
+Database initialisation script for UQS.
 
-Creates:
-  - Demo tables and views for each RBAC role
-  - Audit logging table
-  - Sample data for immediate testing
+Creates the two dynamic RBAC tables in Supabase and seeds default roles:
+  - uqs_roles            — role registry (name, description)
+  - uqs_role_permissions — role → view mapping (role_name, view_name)
+
+Run once at setup:
+    python -m scripts.init_db
+
+Safe to re-run — uses CREATE TABLE IF NOT EXISTS and INSERT ... ON CONFLICT DO NOTHING.
 """
+from __future__ import annotations
+
 import asyncio
+import logging
+import sys
+
 from sqlalchemy import text
+
+# Allow running as `python -m scripts.init_db` from project root
+sys.path.insert(0, ".")
+
 from backend.core.database import get_db_session
 
-SCHEMA_SQL = """
--- ═══════════════════════════════════════════════════════════
--- UQS Demo Schema — Replace with your actual schema in prod
--- ═══════════════════════════════════════════════════════════
+log = logging.getLogger("uqs.init_db")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 
--- Base tables
-CREATE TABLE IF NOT EXISTS sales_fact (
+
+# ── SQL Statements ────────────────────────────────────────────────────────────
+
+CREATE_ROLES_TABLE = """
+CREATE TABLE IF NOT EXISTS uqs_roles (
     id          SERIAL PRIMARY KEY,
-    sale_date   DATE NOT NULL,
-    region      VARCHAR(50),
-    product     VARCHAR(100),
-    channel     VARCHAR(50),
-    customer_id INTEGER,
-    revenue     NUMERIC(12, 2),
-    units       INTEGER,
-    ad_spend    NUMERIC(10, 2)
+    name        TEXT UNIQUE NOT NULL,
+    description TEXT,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+"""
 
-CREATE TABLE IF NOT EXISTS customer_dim (
-    customer_id     INTEGER PRIMARY KEY,
-    customer_name   VARCHAR(100),
-    email           VARCHAR(100),
-    segment         VARCHAR(50),
-    signup_date     DATE,
-    churn_risk      NUMERIC(3, 2),  -- 0.0 to 1.0
-    lifetime_value  NUMERIC(12, 2)
-);
-
-CREATE TABLE IF NOT EXISTS audit_trail (
+CREATE_PERMISSIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS uqs_role_permissions (
     id          SERIAL PRIMARY KEY,
-    timestamp   TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    user_id     VARCHAR(100),
-    role        VARCHAR(50),
-    event       VARCHAR(100),
-    details     JSONB
+    role_name   TEXT NOT NULL,
+    view_name   TEXT NOT NULL,               -- '*' means full access (admin only)
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (role_name, view_name)
 );
+"""
 
--- RBAC Views ──────────────────────────────────────────────────
+# Default roles — add more via Supabase dashboard or SQL
+SEED_ROLES = [
+    ("admin",            "Full schema access — all tables and columns"),
+    ("analyst",          "Aggregated views only, no PII, no row-level data"),
+    ("regional_manager", "Region-filtered aggregated views, no PII"),
+    ("auditor",          "Audit trail tables only"),
+    ("viewer",           "Summary dashboard views only"),
+]
 
--- Analyst view: aggregated only, no PII
+# Default view permissions per role
+# Extend these after creating your views in Supabase
+SEED_PERMISSIONS = [
+    # admin gets wildcard — full public schema
+    ("admin",            "*"),
+    # analyst — aggregated views
+    ("analyst",          "analyst_sales_view"),
+    ("analyst",          "analyst_kpi_view"),
+    # regional manager — region-scoped views
+    ("regional_manager", "rm_sales_view"),
+    ("regional_manager", "rm_customer_view"),
+    # auditor
+    ("auditor",          "audit_trail_view"),
+    # viewer
+    ("viewer",           "dashboard_summary_view"),
+]
+
+# Demo views — created if they don't exist (for hackathon without real data)
+CREATE_DEMO_VIEWS = """
+-- Demo view: analyst sees aggregated sales
 CREATE OR REPLACE VIEW analyst_sales_view AS
 SELECT
-    region,
-    product,
-    channel,
-    DATE_TRUNC('month', sale_date) AS month,
-    SUM(revenue)   AS total_revenue,
-    SUM(units)     AS total_units,
-    COUNT(*)       AS transaction_count,
-    AVG(revenue)   AS avg_order_value
-FROM sales_fact
-GROUP BY region, product, channel, DATE_TRUNC('month', sale_date);
+    'North'::text              AS region,
+    'Electronics'::text        AS product_category,
+    DATE_TRUNC('month', NOW()) AS month,
+    142500.00::numeric         AS total_revenue,
+    320::integer               AS transaction_count
+LIMIT 0;  -- Empty skeleton — replace with real data query
 
--- Analyst KPI view
-CREATE OR REPLACE VIEW analyst_kpi_view AS
-SELECT
-    DATE_TRUNC('day', sale_date) AS date,
-    SUM(revenue)                  AS daily_revenue,
-    SUM(units)                    AS daily_units,
-    COUNT(DISTINCT customer_id)   AS unique_customers
-FROM sales_fact
-GROUP BY DATE_TRUNC('day', sale_date);
-
--- Regional Manager view: region-filtered, no PII
-CREATE OR REPLACE VIEW rm_sales_view AS
-SELECT
-    region,
-    product,
-    channel,
-    sale_date,
-    revenue,
-    units
-FROM sales_fact;
-
--- Regional Manager customer view (no email PII)
-CREATE OR REPLACE VIEW rm_customer_view AS
-SELECT
-    customer_id,
-    segment,
-    signup_date,
-    churn_risk,
-    lifetime_value
-FROM customer_dim;
-
--- Auditor view: only audit trail
-CREATE OR REPLACE VIEW audit_trail_view AS
-SELECT * FROM audit_trail;
-
--- Public dashboard
+-- Demo view: dashboard summary
 CREATE OR REPLACE VIEW dashboard_summary_view AS
 SELECT
-    DATE_TRUNC('week', sale_date) AS week,
-    SUM(revenue)                   AS weekly_revenue,
-    SUM(units)                     AS weekly_units,
-    COUNT(DISTINCT customer_id)    AS new_customers
-FROM sales_fact
-GROUP BY DATE_TRUNC('week', sale_date)
-ORDER BY week DESC;
-
--- ── Sample data ───────────────────────────────────────────────
-INSERT INTO sales_fact (sale_date, region, product, channel, customer_id, revenue, units, ad_spend)
-SELECT
-    CURRENT_DATE - (generate_series(1, 365) || ' days')::interval,
-    (ARRAY['North', 'South', 'East', 'West'])[floor(random() * 4 + 1)],
-    (ARRAY['ProductA', 'ProductB', 'ProductC'])[floor(random() * 3 + 1)],
-    (ARRAY['Online', 'Retail', 'Partner'])[floor(random() * 3 + 1)],
-    floor(random() * 1000 + 1)::int,
-    round((random() * 1000 + 50)::numeric, 2),
-    floor(random() * 20 + 1)::int,
-    round((random() * 200)::numeric, 2)
-ON CONFLICT DO NOTHING;
-
-INSERT INTO customer_dim (customer_id, customer_name, email, segment, signup_date, churn_risk, lifetime_value)
-SELECT
-    generate_series(1, 1000),
-    'Customer ' || generate_series(1, 1000),
-    'customer' || generate_series(1, 1000) || '@example.com',
-    (ARRAY['Enterprise', 'SMB', 'Consumer'])[floor(random() * 3 + 1)],
-    CURRENT_DATE - (random() * 730 || ' days')::interval,
-    round(random()::numeric, 2),
-    round((random() * 50000)::numeric, 2)
-ON CONFLICT DO NOTHING;
-
-RAISE NOTICE 'UQS schema initialized successfully!';
+    'All'::text  AS region,
+    0::numeric   AS total_revenue,
+    0::integer   AS active_customers
+LIMIT 0;
 """
 
 
-async def init_db():
-    print("🚀 Initializing UQS database schema...")
+async def run():
+    log.info("Connecting to Supabase PostgreSQL...")
     async with get_db_session() as session:
-        # Run in pieces since some statements can't be batched
-        statements = [s.strip() for s in SCHEMA_SQL.split(";") if s.strip()]
-        for stmt in statements:
-            if stmt and not stmt.startswith("--") and not stmt.startswith("RAISE"):
-                try:
-                    await session.execute(text(stmt))
-                    print(f"  ✅ Executed: {stmt[:60]}...")
-                except Exception as e:
-                    print(f"  ⚠️  Skipped (may already exist): {e}")
-    print("✅ Database schema initialization complete!")
+        # Create tables
+        log.info("Creating uqs_roles table...")
+        await session.execute(text(CREATE_ROLES_TABLE))
+
+        log.info("Creating uqs_role_permissions table...")
+        await session.execute(text(CREATE_PERMISSIONS_TABLE))
+
+        # Seed roles
+        log.info("Seeding default roles...")
+        for name, description in SEED_ROLES:
+            await session.execute(
+                text("""
+                    INSERT INTO uqs_roles (name, description)
+                    VALUES (:name, :description)
+                    ON CONFLICT (name) DO NOTHING;
+                """),
+                {"name": name, "description": description},
+            )
+
+        # Seed permissions
+        log.info("Seeding default view permissions...")
+        for role_name, view_name in SEED_PERMISSIONS:
+            await session.execute(
+                text("""
+                    INSERT INTO uqs_role_permissions (role_name, view_name)
+                    VALUES (:role_name, :view_name)
+                    ON CONFLICT (role_name, view_name) DO NOTHING;
+                """),
+                {"role_name": role_name, "view_name": view_name},
+            )
+
+        # Create demo views
+        log.info("Creating demo views (skeletons)...")
+        try:
+            await session.execute(text(CREATE_DEMO_VIEWS))
+        except Exception as e:
+            log.warning(f"Demo views skipped (may already exist): {e}")
+
+        await session.commit()
+
+    log.info("✅ Database initialisation complete.")
+    log.info("   uqs_roles and uqs_role_permissions tables are ready.")
+    log.info("   Add your real views in Supabase and register them in uqs_role_permissions.")
 
 
 if __name__ == "__main__":
-    asyncio.run(init_db())
+    asyncio.run(run())
