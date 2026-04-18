@@ -7,7 +7,7 @@ import {
   Zap, LayoutGrid, Settings, ChevronLeft,
   ChevronRight, Layers, Shield, Activity, Info,
   Key, CheckCircle, AlertCircle, Loader2,
-  Sun, Moon, Lock, Mail, LogOut
+  Sun, Moon, Lock, Mail, LogOut, Eye, EyeOff
 } from 'lucide-react';
 
 import ChatInterface from '@/components/ChatInterface';
@@ -69,6 +69,7 @@ function StatusPill({ status, model }: { status: 'connected' | 'error' | 'loadin
 // ── Auth setup modal ──────────────────────────────────────────────────────────
 function AuthModal({ onDone }: { onDone: () => void }) {
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -83,21 +84,25 @@ function AuthModal({ onDone }: { onDone: () => void }) {
     setLoading(true);
     setError('');
     try {
-      // Derive dev role from email for demo
-      let selectedRole = 'viewer';
-      const eml = email.toLowerCase();
-      if (eml.includes('admin')) selectedRole = 'admin';
-      else if (eml.includes('analyst')) selectedRole = 'analyst';
-      else if (eml.includes('manager')) selectedRole = 'regional_manager';
-      else if (eml.includes('audit')) selectedRole = 'auditor';
-
-      // Spoofing the password validation for the Hackathon Demo UI feel
-      if (password !== 'UQS@Natwest.com') {
-         throw new Error("Invalid credentials. Hint: use project DB password.");
+      // Real authentication against the backend login endpoint
+      // which will verify against Supabase Auth!
+      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') + '/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      
+      if (!res.ok) {
+        let msg = 'Invalid credentials';
+        try {
+           const errData = await res.json();
+           msg = errData.detail || msg;
+        } catch(e) {}
+        throw new Error(msg);
       }
-
-      const token = await fetchDevToken(selectedRole);
-      setAuthToken(token);
+      
+      const data = await res.json();
+      setAuthToken(data.access_token);
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Invalid credentials or backend offline.');
@@ -160,13 +165,25 @@ function AuthModal({ onDone }: { onDone: () => void }) {
             <div style={{ position: 'relative' }}>
               <Key size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="uqs-input"
-                style={{ width: '100%', padding: '12px 14px 12px 42px' }}
+                style={{ width: '100%', padding: '12px 42px 12px 42px' }}
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+                  padding: 0, display: 'flex'
+                }}
+                title={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
           </div>
 
@@ -197,7 +214,7 @@ function AuthModal({ onDone }: { onDone: () => void }) {
         </form>
 
         <p style={{ textAlign: 'center', marginTop: 24, fontSize: 12, color: 'var(--text-muted)' }}>
-          Hackathon Hint: Any email with <strong style={{color: 'var(--text-primary)'}}>admin</strong>/<strong style={{color: 'var(--text-primary)'}}>analyst</strong> and db password.
+          Authenticates securely against <strong style={{color: 'var(--text-primary)'}}>Supabase Auth</strong>
         </p>
       </div>
     </div>

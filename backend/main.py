@@ -16,6 +16,7 @@ from backend.api.admin import router as admin_router
 from backend.api.documents import router as documents_router
 from backend.api.query import router as query_router
 from backend.api.schema_api import router as schema_router
+from backend.api.auth import router as auth_router
 from backend.config import settings
 from backend.core.database import ping_database
 from backend.core.logger import AuditEvent, system_logger
@@ -110,6 +111,7 @@ def create_app() -> FastAPI:
     app.include_router(documents_router)
     app.include_router(admin_router)
     app.include_router(schema_router)
+    app.include_router(auth_router)
 
     # ── Health ────────────────────────────────────────────────────────────────
     @app.get("/health", tags=["system"])
