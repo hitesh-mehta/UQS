@@ -29,8 +29,8 @@ from backend.core.database import get_db_session
 
 log = logging.getLogger("uqs.rbac")
 
-# ── In-process cache: {role: [view_names]} — refreshed on first access ─────
-# Invalidate via invalidate_schema_cache() when roles change in DB
+# Caching has been completely removed as requested.
+# The system now fetches 100% dynamically from Supabase on every request.
 _role_views_cache: dict[str, list[str]] = {}
 _schema_cache: dict[str, list[dict]] = {}
 
@@ -40,15 +40,11 @@ _schema_cache: dict[str, list[dict]] = {}
 async def get_role_views(role: str) -> list[str]:
     """
     Fetch the list of view names permitted for this role from uqs_role_permissions.
-    Results are cached in memory for the process lifetime.
+    Results are fetched dynamically every time.
 
     Falls back to a safe default (empty list → schema injection blocked)
     if the role is not found in the DB.
     """
-    # Return cached result if available
-    if role in _role_views_cache:
-        return _role_views_cache[role]
-
     try:
         async with get_db_session() as session:
             result = await session.execute(
@@ -70,7 +66,6 @@ async def get_role_views(role: str) -> list[str]:
 
         views = [row[0] for row in rows]
         log.info(f"Loaded {len(views)} views for role '{role}' from DB")
-        _role_views_cache[role] = views
         return views
 
     except Exception as exc:
@@ -112,14 +107,10 @@ async def get_role_schema(role: str) -> list[dict]:
     """
     Load the schema (columns, types) for all views accessible to the given role.
     Queries information_schema.columns for each permitted view.
-    Results are LRU-cached per role for the process lifetime.
+    Fetched dynamically on every query.
     """
-    if role in _schema_cache:
-        return _schema_cache[role]
-
     views = await get_role_views(role)
     if not views:
-        _schema_cache[role] = []
         return []
 
     schema_data: list[dict] = []
@@ -155,8 +146,7 @@ async def get_role_schema(role: str) -> list[dict]:
             if columns:
                 schema_data.append({"view_name": view_name, "columns": columns})
 
-    _schema_cache[role] = schema_data
-    log.info(f"Schema cached for role '{role}': {len(schema_data)} views")
+    log.info(f"Schema loaded completely dynamically for role '{role}': {len(schema_data)} views")
     return schema_data
 
 
