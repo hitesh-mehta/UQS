@@ -2,7 +2,11 @@
 
 import type { CacheStatus, ModelRegistryEntry, QueryResponse, UploadedDocument } from './types';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const isBrowser = typeof window !== 'undefined';
+// Use relative proxy in the browser to defeat Mixed Content errors (HTTPS -> HTTP)
+const BASE_URL = isBrowser 
+  ? (process.env.NEXT_PUBLIC_API_URL || '/proxy') 
+  : (process.env.BACKEND_API_URL || 'http://localhost:8000');
 
 // ── Auth token ────────────────────────────────────────────────────────────────
 let _authToken: string | null = null;

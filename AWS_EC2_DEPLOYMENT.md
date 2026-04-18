@@ -97,9 +97,10 @@ The final step is telling your Vercel Frontend where to send questions!
 1. Go to your **Vercel Dashboard**.
 2. Open your `UQS` project and go to **Settings** -> **Environment Variables**.
 3. Add a new variable:
-   - **Key:** `NEXT_PUBLIC_API_URL`
+   - **Key:** `BACKEND_API_URL`
    - **Value:** `http://YOUR_AWS_PUBLIC_IP:8000` (Replace with your literal EC2 IP).
-4. Click **Save** and trigger a redeploy on Vercel.
+4. Remove `NEXT_PUBLIC_API_URL` if you created it earlier.
+5. Click **Save** and trigger a redeploy on Vercel.
 
 **Access your app!**
 Visit **`https://uqs.vercel.app`** and the whole pipeline will integrate beautifully. The CORS policy is already unlocked to accept your exact Vercel link!
