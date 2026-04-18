@@ -130,6 +130,9 @@ async def run():
                 {"role_name": role_name, "view_name": view_name},
             )
 
+        # Commit tables and seeds FIRST to ensure they are saved!
+        await session.commit()
+
         # Create demo views
         log.info("Creating demo views (skeletons)...")
         try:
