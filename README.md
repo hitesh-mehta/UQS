@@ -9,6 +9,10 @@
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?logo=supabase)](https://supabase.com)
 [![Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
+### 🌐 Live Deployment URLs
+- **Frontend App (Vercel):** [https://uqs.vercel.app](https://uqs.vercel.app)
+- **Backend API (AWS EC2):** Hosted on AWS EC2 (Public URL)
+
 ---
 
 ## 📋 Table of Contents
