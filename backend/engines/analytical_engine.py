@@ -183,10 +183,25 @@ class AnalyticalEngine:
         if not sql:
             return purpose, [], []
         try:
+            from decimal import Decimal
+            from datetime import date, datetime, time as dt_time, timedelta
+
+            def _json_safe(val):
+                if isinstance(val, Decimal):
+                    return float(val)
+                if isinstance(val, (datetime, date, dt_time)):
+                    return val.isoformat()
+                if isinstance(val, timedelta):
+                    return str(val)
+                return val
+
             async with get_db_session() as db:
                 result = await db.execute(text(sql))
                 columns = list(result.keys())
-                rows = [dict(zip(columns, row)) for row in result.fetchall()]
+                rows = [
+                    {col: _json_safe(val) for col, val in zip(columns, row)}
+                    for row in result.fetchall()
+                ]
             # Extract table names from SQL (simple heuristic)
             import re
             tables = re.findall(r'\bFROM\s+(\w+)|\bJOIN\s+(\w+)', sql, re.IGNORECASE)

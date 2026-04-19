@@ -11,10 +11,28 @@ import asyncio
 import json
 import time
 import uuid
+from datetime import date, datetime, time as dt_time, timedelta
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+
+class SafeJSONEncoder(json.JSONEncoder):
+    """Handle Decimal, datetime, date etc. from PostgreSQL results."""
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        if isinstance(obj, (datetime, date, dt_time)):
+            return obj.isoformat()
+        if isinstance(obj, timedelta):
+            return str(obj)
+        return super().default(obj)
+
+
+def _safe_dumps(obj):
+    return json.dumps(obj, cls=SafeJSONEncoder)
 
 from backend.core.auth import UserContext, get_current_user
 from backend.core.logger import AuditEvent, AuditLogger
@@ -201,7 +219,7 @@ async def query_stream(
                 if await request.is_disconnected():
                     break
                 chunk = word + (" " if i < len(words) - 1 else "")
-                yield f"event: token\ndata: {json.dumps({'token': chunk})}\n\n"
+                yield f"event: token\ndata: {_safe_dumps({'token': chunk})}\n\n"
                 await asyncio.sleep(0.01)  # ~100 words/sec streaming
 
             # Send metadata after full answer streamed
@@ -218,13 +236,13 @@ async def query_stream(
                 "model_version": response.get("model_version"),
                 "session_id": sid,
             }
-            yield f"event: metadata\ndata: {json.dumps(meta)}\n\n"
+            yield f"event: metadata\ndata: {_safe_dumps(meta)}\n\n"
             yield "event: done\ndata: {}\n\n"
 
         except HTTPException as e:
-            yield f"event: error\ndata: {json.dumps({'detail': e.detail})}\n\n"
+            yield f"event: error\ndata: {_safe_dumps({'detail': e.detail})}\n\n"
         except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
+            yield f"event: error\ndata: {_safe_dumps({'detail': str(e)})}\n\n"
 
     return StreamingResponse(
         event_generator(),

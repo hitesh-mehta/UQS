@@ -50,10 +50,20 @@ _BLOCKED_PATTERNS = re.compile(
 
 def _is_safe_sql(sql: str) -> tuple[bool, str]:
     """Returns (is_safe, reason). Blocks any DML or DDL."""
-    match = _BLOCKED_PATTERNS.search(sql)
+    # Strip leading whitespace, comments, and markdown code fences
+    cleaned = sql.strip()
+    # Remove markdown ```sql ... ``` wrappers the LLM sometimes adds
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:sql)?\s*", "", cleaned)
+        cleaned = re.sub(r"```\s*$", "", cleaned).strip()
+    # Strip SQL single-line comments (-- ...)
+    cleaned = re.sub(r"--[^\n]*\n?", "", cleaned).strip()
+
+    match = _BLOCKED_PATTERNS.search(cleaned)
     if match:
         return False, f"Blocked dangerous SQL keyword: {match.group(0).upper()}"
-    if not sql.strip().upper().startswith("SELECT"):
+    upper = cleaned.upper()
+    if not (upper.startswith("SELECT") or upper.startswith("WITH")):
         return False, "Only SELECT statements are allowed."
     return True, ""
 
@@ -164,8 +174,30 @@ class SQLEngine:
 
     async def _execute_sql(self, sql: str) -> tuple[list[dict], list[str]]:
         """Execute a SELECT query and return rows + column names."""
+        from decimal import Decimal
+        from datetime import date, datetime, time, timedelta
+
+        def _json_safe(val: Any) -> Any:
+            """Convert DB types to JSON-serializable Python types."""
+            if isinstance(val, Decimal):
+                return float(val)
+            if isinstance(val, (datetime, date, time)):
+                return val.isoformat()
+            if isinstance(val, timedelta):
+                return str(val)
+            return val
+
+        # Strip markdown code fences the LLM sometimes wraps around SQL
+        clean_sql = sql.strip()
+        if clean_sql.startswith("```"):
+            clean_sql = re.sub(r"^```(?:sql)?\s*", "", clean_sql)
+            clean_sql = re.sub(r"```\s*$", "", clean_sql).strip()
+
         async with get_db_session() as session:
-            result = await session.execute(text(sql))
+            result = await session.execute(text(clean_sql))
             columns = list(result.keys())
-            rows = [dict(zip(columns, row)) for row in result.fetchall()]
+            rows = [
+                {col: _json_safe(val) for col, val in zip(columns, row)}
+                for row in result.fetchall()
+            ]
         return rows, columns

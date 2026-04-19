@@ -58,20 +58,28 @@ SEED_ROLES = [
 ]
 
 # Default view permissions per role
-# Extend these after creating your views in Supabase
+# These map to the REAL views/tables in the Supabase database.
+# Extend via Supabase dashboard or SQL after deployment.
 SEED_PERMISSIONS = [
     # admin gets wildcard — full public schema
     ("admin",            "*"),
-    # analyst — aggregated views
-    ("analyst",          "analyst_sales_view"),
-    ("analyst",          "analyst_kpi_view"),
-    # regional manager — region-scoped views
-    ("regional_manager", "rm_sales_view"),
-    ("regional_manager", "rm_customer_view"),
-    # auditor
-    ("auditor",          "audit_trail_view"),
-    # viewer
-    ("viewer",           "dashboard_summary_view"),
+    # analyst — all analytical views
+    ("analyst",          "daily_sales_view"),
+    ("analyst",          "monthly_revenue_view"),
+    ("analyst",          "top_products_view"),
+    ("analyst",          "low_inventory_view"),
+    ("analyst",          "employee_performance_view"),
+    # regional manager — sales and inventory
+    ("regional_manager", "daily_sales_view"),
+    ("regional_manager", "monthly_revenue_view"),
+    ("regional_manager", "low_inventory_view"),
+    # auditor — sales and employee performance
+    ("auditor",          "daily_sales_view"),
+    ("auditor",          "employee_performance_view"),
+    # viewer — summary views only
+    ("viewer",           "daily_sales_view"),
+    ("viewer",           "monthly_revenue_view"),
+    ("viewer",           "top_products_view"),
 ]
 
 # Demo views — created if they don't exist (for hackathon without real data)
