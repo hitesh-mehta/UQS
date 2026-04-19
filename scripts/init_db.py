@@ -1,9 +1,8 @@
 """
 Database initialisation script for UQS.
 
-Creates the two dynamic RBAC tables in Supabase and seeds default roles:
-  - uqs_roles            — role registry (name, description)
-  - uqs_role_permissions — role → view mapping (role_name, view_name)
+Creates RBAC tables, seeds roles (including manager), and creates the
+uqs_tenants table for multi-tenancy support.
 
 Run once at setup:
     python -m scripts.init_db
@@ -18,9 +17,7 @@ import sys
 
 from sqlalchemy import text
 
-# Allow running as `python -m scripts.init_db` from project root
 sys.path.insert(0, ".")
-
 from backend.core.database import get_db_session
 
 log = logging.getLogger("uqs.init_db")
@@ -42,27 +39,40 @@ CREATE_PERMISSIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS uqs_role_permissions (
     id          SERIAL PRIMARY KEY,
     role_name   TEXT NOT NULL,
-    view_name   TEXT NOT NULL,               -- '*' means full access (admin only)
+    view_name   TEXT NOT NULL,
     created_at  TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (role_name, view_name)
 );
 """
 
-# Default roles — add more via Supabase dashboard or SQL
+CREATE_TENANTS_TABLE = """
+CREATE TABLE IF NOT EXISTS uqs_tenants (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    supabase_url  TEXT NOT NULL,
+    anon_key      TEXT NOT NULL,
+    service_key   TEXT NOT NULL,
+    db_url        TEXT NOT NULL,
+    contact_email TEXT,
+    active        BOOLEAN DEFAULT true,
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
+# Default roles — manager is now a first-class role (= admin-level access)
 SEED_ROLES = [
     ("admin",            "Full schema access — all tables and columns"),
+    ("manager",          "Full schema access + team management — equivalent to admin"),
     ("analyst",          "Aggregated views only, no PII, no row-level data"),
     ("regional_manager", "Region-filtered aggregated views, no PII"),
     ("auditor",          "Audit trail tables only"),
     ("viewer",           "Summary dashboard views only"),
 ]
 
-# Default view permissions per role
-# These map to the REAL views/tables in the Supabase database.
-# Extend via Supabase dashboard or SQL after deployment.
 SEED_PERMISSIONS = [
-    # admin gets wildcard — full public schema
+    # admin + manager both get wildcard — full public schema
     ("admin",            "*"),
+    ("manager",          "*"),
     # analyst — all analytical views
     ("analyst",          "daily_sales_view"),
     ("analyst",          "monthly_revenue_view"),
@@ -82,51 +92,30 @@ SEED_PERMISSIONS = [
     ("viewer",           "top_products_view"),
 ]
 
-# Demo views — created if they don't exist (for hackathon without real data)
-CREATE_DEMO_VIEWS = """
--- Demo view: analyst sees aggregated sales
-CREATE OR REPLACE VIEW analyst_sales_view AS
-SELECT
-    'North'::text              AS region,
-    'Electronics'::text        AS product_category,
-    DATE_TRUNC('month', NOW()) AS month,
-    142500.00::numeric         AS total_revenue,
-    320::integer               AS transaction_count
-LIMIT 0;  -- Empty skeleton — replace with real data query
-
--- Demo view: dashboard summary
-CREATE OR REPLACE VIEW dashboard_summary_view AS
-SELECT
-    'All'::text  AS region,
-    0::numeric   AS total_revenue,
-    0::integer   AS active_customers
-LIMIT 0;
-"""
-
 
 async def run():
     log.info("Connecting to Supabase PostgreSQL...")
     async with get_db_session() as session:
-        # Create tables
         log.info("Creating uqs_roles table...")
         await session.execute(text(CREATE_ROLES_TABLE))
 
         log.info("Creating uqs_role_permissions table...")
         await session.execute(text(CREATE_PERMISSIONS_TABLE))
 
-        # Seed roles
-        log.info("Seeding default roles...")
+        log.info("Creating uqs_tenants table...")
+        await session.execute(text(CREATE_TENANTS_TABLE))
+
+        log.info("Seeding default roles (including manager)...")
         for name, description in SEED_ROLES:
             await session.execute(
                 text("""
                     INSERT INTO uqs_roles (name, description)
                     VALUES (:name, :description)
-                    ON CONFLICT (name) DO NOTHING;
+                    ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description;
                 """),
                 {"name": name, "description": description},
             )
 
-        # Seed permissions
         log.info("Seeding default view permissions...")
         for role_name, view_name in SEED_PERMISSIONS:
             await session.execute(
@@ -138,21 +127,48 @@ async def run():
                 {"role_name": role_name, "view_name": view_name},
             )
 
-        # Commit tables and seeds FIRST to ensure they are saved!
+        await session.commit()
+        log.info("✅ Tables and seeds committed.")
+
+        # Demo views (best-effort)
+        log.info("Creating demo skeleton views...")
+        demo_views = [
+            """
+            CREATE OR REPLACE VIEW daily_sales_view AS
+            SELECT
+                'North'::text        AS region,
+                'Electronics'::text  AS product_category,
+                CURRENT_DATE         AS sale_date,
+                0::numeric           AS revenue,
+                0::integer           AS transaction_count
+            LIMIT 0;
+            """,
+            """
+            CREATE OR REPLACE VIEW monthly_revenue_view AS
+            SELECT
+                'North'::text                          AS region,
+                DATE_TRUNC('month', CURRENT_DATE)     AS month,
+                0::numeric                             AS total_revenue
+            LIMIT 0;
+            """,
+        ]
+        for sql in demo_views:
+            try:
+                await session.execute(text(sql))
+            except Exception as e:
+                log.warning("Demo view skipped (may already exist or conflict): %s", e)
         await session.commit()
 
-        # Create demo views
-        log.info("Creating demo views (skeletons)...")
-        try:
-            await session.execute(text(CREATE_DEMO_VIEWS))
-        except Exception as e:
-            log.warning(f"Demo views skipped (may already exist): {e}")
-
-        await session.commit()
-
-    log.info("✅ Database initialisation complete.")
-    log.info("   uqs_roles and uqs_role_permissions tables are ready.")
-    log.info("   Add your real views in Supabase and register them in uqs_role_permissions.")
+    log.info("")
+    log.info("✅ Database initialisation complete!")
+    log.info("   • uqs_roles             — seeded with admin, manager, analyst, regional_manager, auditor, viewer")
+    log.info("   • uqs_role_permissions  — admin + manager have full wildcard access")
+    log.info("   • uqs_tenants           — multi-tenancy table created")
+    log.info("")
+    log.info("Next steps:")
+    log.info("   1. In Supabase dashboard: set user's app_metadata = {\"role\": \"manager\"}")
+    log.info("   2. Start the backend: uvicorn backend.main:app --reload")
+    log.info("   3. Login with manager credentials — you will have full admin access")
 
 
 if __name__ == "__main__":

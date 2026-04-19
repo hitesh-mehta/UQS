@@ -87,6 +87,20 @@ export interface CacheSummary {
   summary: string;
 }
 
+export interface CachedReportDetail {
+  granularity: string;
+  period: string;
+  generated_at: string;
+  coverage: string;
+  metrics: string[];
+  summary_narrative: string;
+  key_metrics: KeyMetric[];
+  trend_analysis: Record<string, { direction: string; insight?: string }>;
+  anomaly_flags: Array<{ metric: string; description: string; severity: string }>;
+  top_contributors: Record<string, unknown>;
+  raw_data: Record<string, unknown>;
+}
+
 export interface ModelRegistryEntry {
   active_version: number;
   all_versions: number[];
@@ -94,4 +108,21 @@ export interface ModelRegistryEntry {
   model_type: string;
   trained_at: string;
   features: string[];
+}
+
+export interface TenantInfo {
+  tenant_id: string;
+  name: string;
+  supabase_url: string;
+  contact_email: string;
+  created_at: string;
+}
+
+export interface LoginResult {
+  access_token: string;
+  token_type: string;
+  role: string;
+  email: string;
+  is_admin: boolean;
+  display_name: string;
 }

@@ -16,6 +16,9 @@ from backend.config import settings
 
 security = HTTPBearer()
 
+# Roles with admin-level access in UQS
+ADMIN_ROLES = {"admin", "manager"}
+
 
 # ── Data Models ───────────────────────────────────────────────────────────────
 
@@ -96,10 +99,22 @@ async def get_current_user(
 
 
 async def require_admin(user: UserContext = Depends(get_current_user)) -> UserContext:
-    """FastAPI dependency — ensures the caller is an admin."""
+    """FastAPI dependency — ensures the caller is an admin (strict)."""
     if user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required for this operation.",
+        )
+    return user
+
+
+async def require_manager_or_admin(
+    user: UserContext = Depends(get_current_user),
+) -> UserContext:
+    """FastAPI dependency — allows admin OR manager roles."""
+    if user.role not in ADMIN_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Manager or Admin access required for this operation.",
         )
     return user

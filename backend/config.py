@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000,http://localhost:3001"
 
     # ── Cron ──────────────────────────────────────────────────
-    cron_enabled: bool = False
+    cron_enabled: bool = True
 
     @field_validator("database_url", mode="before")
     @classmethod
