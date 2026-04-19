@@ -11,7 +11,7 @@
 
 ### 🌐 Live Deployment URLs
 - **Frontend App (Vercel):** [https://uqs.vercel.app](https://uqs.vercel.app)
-- **Backend API (AWS EC2):** Hosted on AWS EC2 (Public URL)
+- **Backend API (AWS EC2):** [http://3.25.136.141:8000](http://3.25.136.141:8000)
 
 ---
 
