@@ -242,13 +242,54 @@ class ModelTrainer:
         """Time-series forecasting with Meta Prophet."""
         try:
             from prophet import Prophet
-            prophet_df = df.rename(columns={df.columns[0]: "ds", target_col: "y"})
-            prophet_df["ds"] = pd.to_datetime(prophet_df["ds"])
+
+            ds_col = None
+            for col in df.columns:
+                if col == target_col:
+                    continue
+                if np.issubdtype(df[col].dtype, np.datetime64):
+                    ds_col = col
+                    break
+
+            if ds_col is None:
+                named_candidates = [
+                    col for col in df.columns
+                    if col != target_col and ("date" in col.lower() or "time" in col.lower() or "day" in col.lower())
+                ]
+                if named_candidates:
+                    ds_col = named_candidates[0]
+
+            if ds_col is None:
+                parse_scores: list[tuple[str, float]] = []
+                for col in df.columns:
+                    if col == target_col:
+                        continue
+                    parsed = pd.to_datetime(df[col], errors="coerce")
+                    parse_scores.append((col, float(parsed.notna().mean())))
+                parse_scores.sort(key=lambda item: item[1], reverse=True)
+                if parse_scores and parse_scores[0][1] > 0.6:
+                    ds_col = parse_scores[0][0]
+
+            if ds_col is None:
+                raise ValueError("Forecasting dataset does not include a recognizable datetime column")
+
+            # Prophet expects a clean (ds, y) time-series; normalize and de-duplicate timestamps.
+            prophet_df = df[[ds_col, target_col]].rename(columns={ds_col: "ds", target_col: "y"}).copy()
+            prophet_df["ds"] = pd.to_datetime(prophet_df["ds"], errors="coerce")
+            prophet_df["y"] = pd.to_numeric(prophet_df["y"], errors="coerce")
+            prophet_df = prophet_df.dropna(subset=["ds", "y"])
+            if prophet_df.empty:
+                raise ValueError("Forecasting dataset has no valid datetime/target rows")
+
+            # Duplicate timestamps commonly appear in transactional data; average per timestamp.
+            prophet_df = prophet_df.groupby("ds", as_index=False, sort=True)["y"].mean()
+
             model = Prophet(daily_seasonality=True)
             model.fit(prophet_df)
-            future = model.make_future_dataframe(periods=30)
-            forecast = model.predict(future)
-            mae = float(np.mean(np.abs(prophet_df["y"].values - forecast["yhat"].values[:len(prophet_df)])))
+
+            # Compute MAE on in-sample timestamps to avoid shape mismatches.
+            in_sample_forecast = model.predict(prophet_df[["ds"]])
+            mae = float(np.mean(np.abs(prophet_df["y"].to_numpy() - in_sample_forecast["yhat"].to_numpy())))
             return model, {"mae": round(mae, 4)}
         except ImportError:
             raise RuntimeError("Install 'prophet' package: pip install prophet")

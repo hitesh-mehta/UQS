@@ -174,39 +174,80 @@ class PredictiveEngine:
         df = pd.DataFrame(rows, columns=columns)
         entities = df[entity_column].tolist() if entity_column in df.columns else list(range(len(df)))
 
-        # Use only the features the model was trained on
-        available_features = [f for f in feature_cols if f in df.columns]
-        X = (
-            df[available_features].fillna(0).values
-            if available_features
-            else df.select_dtypes(include=[np.number]).fillna(0).values
-        )
+        if task_type == "forecasting":
+            ds_col = feature_cols[0] if feature_cols and feature_cols[0] in df.columns else None
+            if ds_col is None:
+                datetime_candidates = [
+                    col for col in df.columns
+                    if np.issubdtype(df[col].dtype, np.datetime64) or "date" in col.lower() or "time" in col.lower()
+                ]
+                ds_col = datetime_candidates[0] if datetime_candidates else None
 
-        if X.size == 0:
-            latency_ms = (time.perf_counter() - start) * 1000
-            return PredictiveResult(
-                target=target_name,
-                task_type=task_type,
-                predictions=[],
-                narrative="Inference dataset did not contain usable features for prediction.",
-                model_version=model_version,
-                model_type=model_type,
-                sources=["DB"],
-                latency_ms=latency_ms,
+            if ds_col is None:
+                latency_ms = (time.perf_counter() - start) * 1000
+                return PredictiveResult(
+                    target=target_name,
+                    task_type=task_type,
+                    predictions=[],
+                    narrative="Forecasting inference dataset did not contain a datetime column for Prophet.",
+                    model_version=model_version,
+                    model_type=model_type,
+                    sources=["DB"],
+                    latency_ms=latency_ms,
+                )
+
+            forecast_input = pd.DataFrame({"ds": pd.to_datetime(df[ds_col], errors="coerce")}).dropna(subset=["ds"])
+            if forecast_input.empty:
+                latency_ms = (time.perf_counter() - start) * 1000
+                return PredictiveResult(
+                    target=target_name,
+                    task_type=task_type,
+                    predictions=[],
+                    narrative="Forecasting inference dataset had no valid datetime values after parsing.",
+                    model_version=model_version,
+                    model_type=model_type,
+                    sources=["DB"],
+                    latency_ms=latency_ms,
+                )
+
+            forecast_df = model.predict(forecast_input)
+            raw_preds = forecast_df["yhat"].to_numpy()
+            entities = forecast_df["ds"].dt.strftime("%Y-%m-%d").tolist()
+            confidence_scores = [None] * len(raw_preds)
+        else:
+            # Use only the features the model was trained on
+            available_features = [f for f in feature_cols if f in df.columns]
+            X = (
+                df[available_features].fillna(0).values
+                if available_features
+                else df.select_dtypes(include=[np.number]).fillna(0).values
             )
 
-        # ── Step 4: Run inference ─────────────────────────────────────────
-        raw_preds = model.predict(X)
+            if X.size == 0:
+                latency_ms = (time.perf_counter() - start) * 1000
+                return PredictiveResult(
+                    target=target_name,
+                    task_type=task_type,
+                    predictions=[],
+                    narrative="Inference dataset did not contain usable features for prediction.",
+                    model_version=model_version,
+                    model_type=model_type,
+                    sources=["DB"],
+                    latency_ms=latency_ms,
+                )
 
-        # For classifiers that support probability
-        if hasattr(model, "predict_proba"):
-            try:
-                proba = model.predict_proba(X)
-                confidence_scores = proba.max(axis=1).tolist()
-            except Exception:
+            # ── Step 4: Run inference ─────────────────────────────────────────
+            raw_preds = model.predict(X)
+
+            # For classifiers that support probability
+            if hasattr(model, "predict_proba"):
+                try:
+                    proba = model.predict_proba(X)
+                    confidence_scores = proba.max(axis=1).tolist()
+                except Exception:
+                    confidence_scores = [None] * len(raw_preds)
+            else:
                 confidence_scores = [None] * len(raw_preds)
-        else:
-            confidence_scores = [None] * len(raw_preds)
 
         # ── Step 5: Build prediction items ───────────────────────────────
         predictions = []
