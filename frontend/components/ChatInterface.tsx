@@ -22,6 +22,44 @@ interface Props {
   onDocumentUploaded?: (doc: UploadedDocument) => void;
 }
 
+const CHAT_HISTORY_LIMIT = 20; // keep last 10 user+assistant turns
+
+function getChatHistoryKey(): string {
+  if (typeof window === 'undefined') return 'uqs_chat_history_guest';
+  const email = localStorage.getItem('uqs_user_email') || 'guest';
+  return `uqs_chat_history_${email.toLowerCase()}`;
+}
+
+function serializeMessages(messages: Message[]): string {
+  return JSON.stringify(
+    messages.slice(-CHAT_HISTORY_LIMIT).map((message) => ({
+      ...message,
+      timestamp: message.timestamp instanceof Date ? message.timestamp.toISOString() : message.timestamp,
+    }))
+  );
+}
+
+function deserializeMessages(raw: string): Message[] {
+  try {
+    const parsed = JSON.parse(raw) as Array<Partial<Message> & { timestamp?: string }>; 
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((message) => typeof message.id === 'string' && typeof message.role === 'string' && typeof message.content === 'string')
+      .slice(-CHAT_HISTORY_LIMIT)
+      .map((message) => ({
+        id: message.id as string,
+        role: message.role as 'user' | 'assistant',
+        content: message.content as string,
+        timestamp: message.timestamp ? new Date(message.timestamp) : new Date(),
+        response: message.response,
+        isLoading: Boolean(message.isLoading),
+        isStreaming: Boolean(message.isStreaming),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 // ── Empty state ───────────────────────────────────────────────────────────────
 function EmptyState({ onExample }: { onExample: (q: string) => void }) {
   return (
@@ -107,6 +145,22 @@ export default function ChatInterface({ sessionId, onDocumentUploaded }: Props) 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = localStorage.getItem(getChatHistoryKey());
+    if (saved) {
+      const restored = deserializeMessages(saved);
+      if (restored.length > 0) {
+        setMessages(restored);
+      }
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(getChatHistoryKey(), serializeMessages(messages));
+  }, [messages]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
@@ -152,13 +206,14 @@ export default function ChatInterface({ sessionId, onDocumentUploaded }: Props) 
           answer: streamedText,
           ...finalMeta,
         } as QueryResponse;
-        setMessages((prev) =>
-          prev.map((m) =>
+        setMessages((prev) => {
+          const next = prev.map((m) =>
             m.id === asstId
               ? { ...m, content: streamedText, response: fullResponse, isLoading: false, isStreaming: false }
               : m
-          )
-        );
+          );
+          return next.slice(-CHAT_HISTORY_LIMIT);
+        });
         setIsStreaming(false);
       },
       onError: (err) => {
@@ -193,7 +248,7 @@ export default function ChatInterface({ sessionId, onDocumentUploaded }: Props) 
     setMessages((prev) =>
       prev.map((m) =>
         m.isStreaming ? { ...m, isStreaming: false } : m
-      )
+      ).slice(-CHAT_HISTORY_LIMIT)
     );
   };
 
