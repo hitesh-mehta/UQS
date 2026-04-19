@@ -8,10 +8,11 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from decimal import Decimal
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 
@@ -59,6 +60,20 @@ class AuditLogEntry(BaseModel):
 
 class JSONFormatter(logging.Formatter):
     """Formats log records as single-line JSON for log aggregators."""
+    @staticmethod
+    def _json_default(value: Any) -> Any:
+        if isinstance(value, UUID):
+            return str(value)
+        if isinstance(value, Decimal):
+            return float(value)
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, BaseModel):
+            return value.model_dump()
+        return str(value)
+
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
             "level": record.levelname,
@@ -68,7 +83,7 @@ class JSONFormatter(logging.Formatter):
         }
         if hasattr(record, "audit_entry"):
             log_data["audit"] = record.audit_entry
-        return json.dumps(log_data)
+        return json.dumps(log_data, default=self._json_default)
 
 
 def _setup_logger() -> logging.Logger:

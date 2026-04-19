@@ -13,6 +13,8 @@ import time
 import uuid
 from datetime import date, datetime, time as dt_time, timedelta
 from decimal import Decimal
+from enum import Enum
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -24,10 +26,18 @@ class SafeJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)
+        if isinstance(obj, UUID):
+            return str(obj)
         if isinstance(obj, (datetime, date, dt_time)):
             return obj.isoformat()
         if isinstance(obj, timedelta):
             return str(obj)
+        if isinstance(obj, Enum):
+            return obj.value
+        if isinstance(obj, BaseModel):
+            return obj.model_dump()
+        if isinstance(obj, set):
+            return list(obj)
         return super().default(obj)
 
 
