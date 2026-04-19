@@ -22,6 +22,7 @@ from backend.engines.rag_engine import RAGEngine
 from backend.engines.rag_plus_plus import RagPlusPlusEngine
 from backend.engines.sql_engine import SQLEngine
 from backend.graph.state import UQSState
+from backend.vector_store.store import vector_store
 
 log = logging.getLogger("uqs.graph")
 
@@ -35,6 +36,17 @@ _rag_plus = RagPlusPlusEngine()
 
 # ── Max seconds any single node may run ───────────────────────────────────────
 NODE_TIMEOUT = 28.0
+
+
+def _session_has_uploaded_docs(session_id: str | None) -> bool:
+    """Check whether this session has any ingested document chunks."""
+    if not session_id:
+        return False
+    for source in vector_store.list_sources():
+        # Ingestion stores source as "filename:session_id".
+        if source.rsplit(":", 1)[-1] == session_id:
+            return True
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,17 +73,36 @@ async def node_classify(state: UQSState) -> dict:
             result.sub_type,
             len(result.reasoning or ""),
         )
+        query_type = result.type
+        relevant = result.relevant
+        polite_rejection = result.polite_rejection if not result.relevant else None
+
+        # If session documents exist, avoid early termination on "irrelevant".
+        # Route to RAG so uploaded docs can still answer the prompt.
+        has_session_docs = _session_has_uploaded_docs(state.get("session_id"))
+        if has_session_docs and (not relevant or query_type == "irrelevant"):
+            log.debug(
+                "node_classify override: session_id=%s docs=%s original_type=%s original_relevant=%s final_type=rag",
+                state.get("session_id"),
+                has_session_docs,
+                query_type,
+                relevant,
+            )
+            query_type = "rag"
+            relevant = True
+            polite_rejection = None
+
         update = {
-            "query_type": result.type,
+            "query_type": query_type,
             "query_sub_type": result.sub_type,
-            "relevant": result.relevant,
-            "polite_rejection": result.polite_rejection if not result.relevant else None,
+            "relevant": relevant,
+            "polite_rejection": polite_rejection,
             "error": None,
         }
         if state.get("audit"):
             state["audit"].log(AuditEvent.ENGINE_ROUTED, details={
-                "query_type": result.type,
-                "relevant": result.relevant,
+                "query_type": query_type,
+                "relevant": relevant,
             })
         return update
     except asyncio.TimeoutError:
