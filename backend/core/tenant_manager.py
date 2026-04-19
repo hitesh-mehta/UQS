@@ -67,6 +67,7 @@ async def register_tenant(
     service_key: str,
     db_url: str,
     contact_email: str,
+    admin_role: str = "admin",
 ) -> dict:
     """
     Register a new tenant. Stores credentials in uqs_tenants table.
@@ -78,9 +79,9 @@ async def register_tenant(
         await session.execute(
             text("""
                 INSERT INTO uqs_tenants
-                  (id, name, supabase_url, anon_key, service_key, db_url, contact_email, active)
+                  (id, name, supabase_url, anon_key, service_key, db_url, contact_email, admin_role, active)
                 VALUES
-                  (:id, :name, :supabase_url, :anon_key, :service_key, :db_url, :email, true)
+                  (:id, :name, :supabase_url, :anon_key, :service_key, :db_url, :email, :admin_role, true)
                 ON CONFLICT (id) DO NOTHING;
             """),
             {
@@ -91,6 +92,7 @@ async def register_tenant(
                 "service_key": service_key,
                 "db_url": db_url,
                 "email": contact_email,
+                "admin_role": admin_role,
             },
         )
         await session.commit()
@@ -139,3 +141,26 @@ async def list_tenants() -> list[dict]:
         {"tenant_id": row[0], "name": row[1], "contact_email": row[2], "created_at": str(row[3])}
         for row in rows
     ]
+
+
+async def get_tenant_auth_info(tenant_id: str) -> Optional[dict]:
+    """Get internal auth info for a tenant (Supabase URL and anon_key)."""
+    async with get_db_session() as session:
+        result = await session.execute(
+            text("""
+                SELECT supabase_url, anon_key, admin_role
+                FROM uqs_tenants
+                WHERE id = :tid AND active = true
+            """),
+            {"tid": tenant_id},
+        )
+        row = result.fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "supabase_url": row[0],
+        "anon_key": row[1],
+        "admin_role": row[2] or "admin",
+    }

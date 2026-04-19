@@ -219,6 +219,7 @@ export async function registerTenant(data: {
   service_key: string;
   db_url: string;
   contact_email: string;
+  admin_role: string;
 }): Promise<{ tenant_id: string; name: string; access_url: string; message: string }> {
   return apiFetch('/api/tenant/register', {
     method: 'POST',

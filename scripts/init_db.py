@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS uqs_tenants (
     db_url        TEXT NOT NULL,
     contact_email TEXT,
     active        BOOLEAN DEFAULT true,
+    admin_role    TEXT,
     created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 """

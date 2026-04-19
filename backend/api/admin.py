@@ -66,9 +66,9 @@ async def get_cache_report_detail(
 async def rollback_model(
     target: str,
     to_version: int,
-    admin: UserContext = Depends(require_admin),
+    admin: UserContext = Depends(require_manager_or_admin),
 ) -> dict:
-    """Roll back a model target to a specific version. Strict admin only."""
+    """Roll back a model target to a specific version. Requires manager or admin."""
     audit = AuditLogger(user_id=admin.user_id, role=admin.role)
     result = model_registry.rollback(target=target, to_version=to_version, admin_only=True)
     audit.log(AuditEvent.MODEL_ROLLBACK, details=result)
@@ -77,9 +77,9 @@ async def rollback_model(
 
 @router.post("/models/retrain")
 async def trigger_retraining(
-    admin: UserContext = Depends(require_admin),
+    admin: UserContext = Depends(require_manager_or_admin),
 ) -> dict:
-    """Manually trigger the full retraining pipeline. Strict admin only."""
+    """Manually trigger the full retraining pipeline. Requires manager or admin."""
     results = await run_all_retraining()
     return {"results": results, "targets_retrained": len(results)}
 
