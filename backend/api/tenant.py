@@ -25,6 +25,46 @@ class TenantRegisterRequest(BaseModel):
     service_key: str
     db_url: str                  # postgresql://... connection string
     contact_email: str
+    admin_role: str
+
+class TenantFetchRolesRequest(BaseModel):
+    db_url: str
+
+
+
+@router.post("/fetch-roles")
+async def fetch_tenant_roles(body: TenantFetchRolesRequest) -> dict:
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy import text
+    
+    db_url = body.db_url
+    if db_url.startswith("postgresql://"):
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        
+    engine = create_async_engine(db_url, connect_args={"ssl": False})
+    
+    try:
+        async with engine.connect() as conn:
+            # Check if uqs_roles exists
+            check_table = await conn.execute(text(
+                "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'uqs_roles');"
+            ))
+            exists = check_table.scalar()
+            
+            if not exists:
+                # If uqs_roles doesn't exist, we fallback to giving a list of standard roles
+                # that UQS expects, so the admin can pick one.
+                return {"roles": ["admin", "manager", "analyst", "auditor", "viewer"]}
+                
+            result = await conn.execute(text("SELECT name FROM uqs_roles"))
+            roles = [row[0] for row in result.fetchall()]
+            return {"roles": roles}
+    except Exception as exc:
+        log.error(f"Failed to fetch roles from tenant db: {exc}")
+        # Return sensible defaults if connection fails or table missing
+        return {"roles": ["admin", "manager", "analyst", "auditor", "viewer"]}
+    finally:
+        await engine.dispose()
 
 
 @router.post("/register")
@@ -46,6 +86,7 @@ async def register_tenant(
             service_key=body.service_key,
             db_url=body.db_url,
             contact_email=body.contact_email,
+            admin_role=body.admin_role,
         )
         tenant_id = result["tenant_id"]
         return {

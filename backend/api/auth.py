@@ -115,9 +115,22 @@ async def login(credentials: LoginRequest):
     Extracts the user's role from app_metadata/user_metadata and issues
     a UQS backend JWT with that role embedded.
     """
-    url = f"{settings.supabase_url}/auth/v1/token?grant_type=password"
+    tenant_supabase_url = settings.supabase_url
+    tenant_anon_key = settings.supabase_anon_key
+    tenant_admin_role = "admin"
+
+    if credentials.tenant_id:
+        from backend.core.tenant_manager import get_tenant_auth_info
+        t_info = await get_tenant_auth_info(credentials.tenant_id)
+        if not t_info:
+            raise HTTPException(status_code=400, detail="Invalid tenant ID.")
+        tenant_supabase_url = t_info["supabase_url"]
+        tenant_anon_key = t_info["anon_key"]
+        tenant_admin_role = t_info["admin_role"]
+
+    url = f"{tenant_supabase_url}/auth/v1/token?grant_type=password"
     headers = {
-        "apikey": settings.supabase_anon_key,
+        "apikey": tenant_anon_key,
         "Content-Type": "application/json",
     }
     payload = {
@@ -155,7 +168,17 @@ async def login(credentials: LoginRequest):
     user_id: str = user_data.get("id", "u_unknown")
     email: str = user_data.get("email", credentials.email)
 
+    # First extract the role strictly from user metadata (without UQS fallback mappings yet)
+    # Actually, _extract_role maps to UQS roles. Let's see what it extracted.
     uqs_role = _extract_role(user_data)
+    
+    # If the user is logging into a tenant, check if their role matches the designated admin_role
+    if credentials.tenant_id and tenant_admin_role:
+        # Check raw role from app/user metadata to see if it matches the tenant_admin_role exactly
+        raw_app_role = (user_data.get("app_metadata") or {}).get("role", "")
+        raw_user_role = (user_data.get("user_metadata") or {}).get("role", "")
+        if raw_app_role == tenant_admin_role or raw_user_role == tenant_admin_role:
+            uqs_role = "manager"
 
     # Issue UQS backend JWT
     token = create_access_token(user_id=user_id, role=uqs_role, email=email)

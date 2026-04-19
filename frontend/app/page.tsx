@@ -88,19 +88,47 @@ function TenantRegisterModal({ onDone, onBack }: { onDone: (tenantId: string, li
   const [result, setResult] = useState<{ tenant_id: string; access_url: string; name: string } | null>(null);
   const [form, setForm] = useState({ name: '', supabase_url: '', anon_key: '', service_key: '', db_url: '', contact_email: '' });
   const [copied, setCopied] = useState(false);
+  
+  const [availableRoles, setAvailableRoles] = useState<string[]>([]);
+  const [selectedRole, setSelectedRole] = useState<string>('admin');
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }));
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleConnectDB = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.supabase_url || !form.anon_key || !form.db_url) {
       setError('Please fill all required fields.'); return;
     }
     setLoading(true); setError('');
     try {
-      const res = await registerTenant(form);
-      setResult(res);
+      const isBrowser = typeof window !== 'undefined';
+      const BASE_URL = isBrowser
+        ? (process.env.NEXT_PUBLIC_API_URL || '/proxy')
+        : (process.env.BACKEND_API_URL || 'http://localhost:8000');
+        
+      const res = await fetch(`${BASE_URL}/api/tenant/fetch-roles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ db_url: form.db_url })
+      });
+      if (!res.ok) throw new Error('Failed to fetch roles from database');
+      const data = await res.json();
+      setAvailableRoles(data.roles || ['admin', 'manager', 'analyst', 'auditor', 'viewer']);
+      if (data.roles && data.roles.length > 0) setSelectedRole(data.roles[0]);
       setStep(2);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Connection failed');
+    } finally { setLoading(false); }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true); setError('');
+    try {
+      const { registerTenant } = await import('@/lib/api');
+      const res = await registerTenant({ ...form, admin_role: selectedRole });
+      setResult(res);
+      setStep(3);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally { setLoading(false); }
@@ -130,7 +158,7 @@ function TenantRegisterModal({ onDone, onBack }: { onDone: (tenantId: string, li
 
         {/* Steps */}
         <div style={{ display:'flex', gap:8, marginBottom:28 }}>
-          {[{n:1,label:'Connect DB'},{n:2,label:'Get Link'}].map(({n,label}) => (
+          {[{n:1,label:'Connect DB'},{n:2,label:'Select Roles'},{n:3,label:'Get Link'}].map(({n,label}) => (
             <div key={n} className={`wizard-step ${step===n?'active':step>n?'done':'pending'}`} style={{ flex:1, justifyContent:'center' }}>
               <div className="wizard-step-circle">{step>n?<CheckCircle size={13}/>:n}</div>
               {label}
@@ -139,7 +167,7 @@ function TenantRegisterModal({ onDone, onBack }: { onDone: (tenantId: string, li
         </div>
 
         {step === 1 && (
-          <form onSubmit={handleSubmit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
+          <form onSubmit={handleConnectDB} style={{ display:'flex', flexDirection:'column', gap:14 }}>
             {[
               { key:'name',          label:'Organization Name *',  placeholder:'Acme Corp / NatWest Analytics',  type:'text' },
               { key:'contact_email', label:'Contact Email *',      placeholder:'admin@company.com',              type:'email' },
@@ -163,13 +191,53 @@ function TenantRegisterModal({ onDone, onBack }: { onDone: (tenantId: string, li
             <div style={{ display:'flex', gap:10, marginTop:4 }}>
               <button type="button" onClick={onBack} className="btn-ghost" style={{ flex:1, padding:'11px' }}>← Back to Login</button>
               <button type="submit" className="btn-primary" style={{ flex:2, padding:'11px' }} disabled={loading}>
+                {loading ? <><Loader2 size={15} className="animate-spin" style={{ marginRight:6 }} />Connecting…</> : 'Connect Database'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {step === 2 && (
+          <form onSubmit={handleRegister} className="fade-in-up" style={{ display:'flex', flexDirection:'column', gap:16 }}>
+            <div style={{ textAlign:'center', padding:'10px 0 16px' }}>
+              <div style={{ width:48, height:48, borderRadius:'50%', background:'rgba(99,102,241,0.15)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 14px' }}>
+                <Shield size={24} color="var(--accent-primary)" />
+              </div>
+              <h3 style={{ fontSize:17, fontWeight:700, marginBottom:6 }}>Select Admin Role</h3>
+              <p style={{ fontSize:13, color:'var(--text-muted)' }}>Choose which role from your database should get full manager access.</p>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {availableRoles.map(role => (
+                <label key={role} style={{
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '14px',
+                  border: selectedRole === role ? '2px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                  background: selectedRole === role ? 'rgba(99,102,241,0.05)' : 'var(--bg-surface)'
+                }}>
+                  <input type="radio" name="admin_role" value={role} checked={selectedRole === role} onChange={() => setSelectedRole(role)} style={{ accentColor: 'var(--accent-primary)', width: 16, height: 16 }} />
+                  <span style={{ fontSize: 14, fontWeight: selectedRole === role ? 700 : 500 }}>{role}</span>
+                  {selectedRole === role && <span className="badge role-badge-admin" style={{ marginLeft: 'auto', fontSize: 10 }}>Admin</span>}
+                </label>
+              ))}
+            </div>
+
+            {error && (
+              <div style={{ padding:'10px 14px', background:'rgba(244,63,94,0.1)', border:'1px solid rgba(244,63,94,0.25)', borderRadius:'var(--radius-sm)', fontSize:12, color:'var(--accent-rose)', display:'flex', gap:8, alignItems:'center' }}>
+                <AlertCircle size={14} />{error}
+              </div>
+            )}
+
+            <div style={{ display:'flex', gap:10, marginTop:10 }}>
+              <button type="button" onClick={() => setStep(1)} className="btn-ghost" style={{ flex:1, padding:'12px' }}>← Back</button>
+              <button type="submit" className="btn-primary" style={{ flex:2, padding:'12px' }} disabled={loading}>
                 {loading ? <><Loader2 size={15} className="animate-spin" style={{ marginRight:6 }} />Registering…</> : 'Register Organization'}
               </button>
             </div>
           </form>
         )}
 
-        {step === 2 && result && (
+        {step === 3 && result && (
           <div className="fade-in-up" style={{ display:'flex', flexDirection:'column', gap:16 }}>
             <div style={{ textAlign:'center', padding:'16px 0' }}>
               <div style={{ width:56, height:56, borderRadius:'50%', background:'rgba(16,185,129,0.15)', border:'2px solid var(--accent-emerald)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 14px' }}>
@@ -192,7 +260,7 @@ function TenantRegisterModal({ onDone, onBack }: { onDone: (tenantId: string, li
             </div>
 
             <div style={{ fontSize:12, color:'var(--text-muted)', background:'rgba(99,102,241,0.06)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-sm)', padding:'10px 14px' }}>
-              <strong>Next step:</strong> Go to your Supabase dashboard → Authentication → Users → click your user → Edit → set <code style={{ fontFamily:'JetBrains Mono' }}>app_metadata</code> to <code style={{ fontFamily:'JetBrains Mono' }}>{`{"role":"manager"}`}</code>
+              <strong>Next step:</strong> Users with the <code>{selectedRole}</code> role in your database will automatically get admin access to this UQS dashboard.
             </div>
 
             <button className="btn-primary" style={{ padding:'12px' }} onClick={() => onDone(result.tenant_id, result.access_url)}>
@@ -213,13 +281,21 @@ function AuthModal({ onDone }: { onDone: (result: LoginResult) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showTenant, setShowTenant] = useState(false);
+  const [urlTenant, setUrlTenant] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      setUrlTenant(params.get('tenant'));
+    }
+  }, []);
 
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!email || !password) { setError('Please enter both email and password.'); return; }
     setLoading(true); setError('');
     try {
-      const result = await loginToSupabase(email, password);
+      const result = await loginToSupabase(email, password, urlTenant || undefined);
       setAuthToken(result.access_token);
       if (typeof window !== 'undefined') {
         localStorage.setItem('uqs_user_role', result.role);
@@ -288,12 +364,14 @@ function AuthModal({ onDone }: { onDone: (result: LoginResult) => void }) {
           </button>
         </form>
 
-        <div style={{ marginTop:20, paddingTop:20, borderTop:'1px solid var(--border-subtle)', textAlign:'center' }}>
-          <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:12 }}>New organization? Register your Supabase project</p>
-          <button className="btn-ghost" style={{ width:'100%', padding:'10px', fontSize:13, display:'flex', alignItems:'center', justifyContent:'center', gap:8 }} onClick={() => setShowTenant(true)}>
-            <Building2 size={14} /> Register Organization
-          </button>
-        </div>
+        {!urlTenant && (
+          <div style={{ marginTop:20, paddingTop:20, borderTop:'1px solid var(--border-subtle)', textAlign:'center' }}>
+            <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:12 }}>New organization? Register your Supabase project</p>
+            <button className="btn-ghost" style={{ width:'100%', padding:'10px', fontSize:13, display:'flex', alignItems:'center', justifyContent:'center', gap:8 }} onClick={() => setShowTenant(true)}>
+              <Building2 size={14} /> Register Organization
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -628,6 +706,7 @@ export default function Home() {
   const [rbacRoles, setRbacRoles] = useState<{ role: string; desc: string; views: string[] }[] | null>(null);
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [retraining, setRetraining] = useState(false);
 
   // Theme
   useEffect(() => {
@@ -853,6 +932,34 @@ export default function Home() {
             {activeTab==='models' && (
               <div style={{ flex:1, padding:'28px 32px', overflow:'auto' }}>
                 <div style={{ maxWidth:700 }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 24 }}>
+                    <div>
+                      <h2 style={{ fontSize:18, fontWeight:700, marginBottom:4 }}>ML Model Registry</h2>
+                      <p style={{ fontSize:13, color:'var(--text-muted)' }}>Versioned predictive models</p>
+                    </div>
+                    {isAdmin && (
+                      <button 
+                        className="btn-primary" 
+                        onClick={async () => {
+                          if (!confirm('Trigger full model retraining? This may take a while.')) return;
+                          setRetraining(true);
+                          try {
+                            const { triggerRetraining } = await import('@/lib/api');
+                            await triggerRetraining();
+                            loadModelData();
+                          } catch (err) {
+                            alert('Retraining failed: ' + (err instanceof Error ? err.message : 'Unknown error'));
+                          } finally {
+                            setRetraining(false);
+                          }
+                        }}
+                        disabled={retraining}
+                        style={{ padding: '8px 16px', fontSize: 13 }}
+                      >
+                        {retraining ? <><Loader2 size={14} className="animate-spin" style={{ marginRight: 6 }} /> Retraining...</> : <><Brain size={14} style={{ marginRight: 6 }} /> Train / Retrain Models</>}
+                      </button>
+                    )}
+                  </div>
                   {modelData ? (
                     <ModelStatus registry={modelData} />
                   ) : (
