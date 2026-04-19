@@ -67,11 +67,29 @@ class QueryClassifier:
             conversation_history=session.get_history_str(),
         )
 
-        raw = await llm_json(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            temperature=0.0,   # Deterministic for classification
-        )
+        try:
+            raw = await llm_json(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                temperature=0.0,   # Deterministic for classification
+            )
+        except Exception as exc:
+            # Fallback keeps pipeline alive when provider output is empty/non-JSON.
+            log.error(
+                "Classifier llm_json failed: exc_type=%s exc_msg=%s query_preview=%r",
+                type(exc).__name__,
+                str(exc),
+                query[:200],
+            )
+            if audit:
+                audit.error("Classifier llm_json failed", exc=exc)
+            return ClassificationResult(
+                relevant=True,
+                type="sql",
+                sub_type="",
+                reasoning="Fallback classification after LLM JSON failure",
+                polite_rejection=None,
+            )
 
         if not isinstance(raw, dict):
             log.warning("Classifier received non-dict JSON payload: type=%s", type(raw).__name__)

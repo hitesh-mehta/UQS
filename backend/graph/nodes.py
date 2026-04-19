@@ -77,7 +77,11 @@ async def node_classify(state: UQSState) -> dict:
     except asyncio.TimeoutError:
         return {"error": "Classification timed out.", "relevant": False, "query_type": "irrelevant"}
     except Exception as exc:
-        log.exception("node_classify failed")
+        log.error(
+            "node_classify failed: exc_type=%s exc_msg=%s",
+            type(exc).__name__,
+            str(exc),
+        )
         return {"error": str(exc), "relevant": False, "query_type": "irrelevant"}
 
 

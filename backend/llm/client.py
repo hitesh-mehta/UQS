@@ -351,6 +351,14 @@ async def llm_json(
         len(raw),
         raw[:500],
     )
+    log.debug(
+        "llm_json raw content full start provider=%s model=%s chars=%s",
+        response.provider,
+        response.model,
+        len(raw),
+    )
+    log.debug("llm_json raw content full body:\n%s", raw)
+    log.debug("llm_json raw content full end")
 
     log.debug(
         "llm_json parse attempt: provider=%s model=%s json_mode=%s raw_is_empty=%s",
