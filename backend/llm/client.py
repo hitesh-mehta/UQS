@@ -116,11 +116,31 @@ class GeminiClient(BaseLLMClient):
 
         model = self._build_model(system_prompt, json_mode, temperature, max_tokens)
 
+        log.debug(
+            "Gemini request start: model=%s json_mode=%s temperature=%s max_tokens=%s user_chars=%s system_chars=%s",
+            self.model_name,
+            json_mode,
+            temperature,
+            max_tokens,
+            len(user_message),
+            len(system_prompt),
+        )
+
         # Run in thread pool to prevent blocking the async event loop
         response = await asyncio.to_thread(self._call_sync, model, user_message)
 
         latency_ms = (time.perf_counter() - start) * 1000
         content = response.text or ""
+
+        log.debug(
+            "Gemini response received: provider=%s model=%s latency_ms=%.0f has_text=%s text_chars=%s preview=%r",
+            "google",
+            self.model_name,
+            latency_ms,
+            bool(content.strip()),
+            len(content),
+            content[:500],
+        )
 
         # Count tokens from usage metadata if available
         tokens = None
@@ -324,9 +344,30 @@ async def llm_json(
     )
     raw = response.content.strip()
 
+    log.debug(
+        "llm_json raw content: provider=%s model=%s chars=%s preview=%r",
+        response.provider,
+        response.model,
+        len(raw),
+        raw[:500],
+    )
+
+    log.debug(
+        "llm_json parse attempt: provider=%s model=%s json_mode=%s raw_is_empty=%s",
+        response.provider,
+        response.model,
+        True,
+        not bool(raw.strip()),
+    )
+
     # 1. Direct parse
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
+        log.debug(
+            "llm_json parsed direct: keys=%s",
+            sorted(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__,
+        )
+        return parsed
     except json.JSONDecodeError:
         pass
 
@@ -334,7 +375,12 @@ async def llm_json(
     fence_match = re.search(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", raw, re.DOTALL)
     if fence_match:
         try:
-            return json.loads(fence_match.group(1))
+            parsed = json.loads(fence_match.group(1))
+            log.debug(
+                "llm_json parsed fenced: keys=%s",
+                sorted(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__,
+            )
+            return parsed
         except json.JSONDecodeError:
             pass
 
@@ -342,7 +388,12 @@ async def llm_json(
     obj_match = re.search(r"\{.*\}", raw, re.DOTALL)
     if obj_match:
         try:
-            return json.loads(obj_match.group(0))
+            parsed = json.loads(obj_match.group(0))
+            log.debug(
+                "llm_json parsed extracted: keys=%s",
+                sorted(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__,
+            )
+            return parsed
         except json.JSONDecodeError:
             pass
 

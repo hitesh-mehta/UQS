@@ -43,9 +43,23 @@ NODE_TIMEOUT = 28.0
 async def node_classify(state: UQSState) -> dict:
     """Classify the query into engine type using LLM."""
     try:
+        log.debug(
+            "node_classify start: session_id=%s query_chars=%s has_session=%s has_audit=%s",
+            state.get("session_id"),
+            len(state.get("query", "")),
+            bool(state.get("session")),
+            bool(state.get("audit")),
+        )
         result = await asyncio.wait_for(
             _classifier.classify(state["session"], state["query"], state.get("audit")),
             timeout=NODE_TIMEOUT,
+        )
+        log.debug(
+            "node_classify result: relevant=%s type=%s sub_type=%s reasoning_chars=%s",
+            result.relevant,
+            result.type,
+            result.sub_type,
+            len(result.reasoning or ""),
         )
         update = {
             "query_type": result.type,
@@ -73,11 +87,17 @@ async def node_classify(state: UQSState) -> dict:
 async def node_check_cache(state: UQSState) -> dict:
     """Check if the query can be answered from a pre-generated cached report."""
     try:
+        log.debug(
+            "node_check_cache start: query_type=%s query_chars=%s",
+            state.get("query_type"),
+            len(state.get("query", "")),
+        )
         result = await asyncio.wait_for(
             check_cache(state["query"]),
             timeout=5.0,  # Cache check should be very fast
         )
         if result.cache_hit:
+            log.debug("node_check_cache hit: matching_report=%s", result.matching_report)
             if state.get("audit"):
                 state["audit"].log(AuditEvent.CACHE_HIT, details={
                     "matching_report": result.matching_report
@@ -88,6 +108,7 @@ async def node_check_cache(state: UQSState) -> dict:
                 "cache_source": result.matching_report,
                 "error": None,
             }
+        log.debug("node_check_cache miss")
         if state.get("audit"):
             state["audit"].log(AuditEvent.CACHE_MISS, details={})
         return {"cache_hit": False}
@@ -241,6 +262,7 @@ async def node_format_response(state: UQSState) -> dict:
 
     # If cache hit — use cache answer
     if state.get("cache_hit") and state.get("cache_answer"):
+        log.debug("node_format_response using cache answer")
         response = {
             "answer": state["cache_answer"],
             "engine": "cache",
@@ -259,6 +281,7 @@ async def node_format_response(state: UQSState) -> dict:
 
     # If irrelevant or error with no answer
     if not state.get("relevant", True):
+        log.debug("node_format_response using rejection path")
         response = {
             "answer": state.get("polite_rejection", "I can only answer questions about your data."),
             "engine": "classifier",
@@ -280,6 +303,13 @@ async def node_format_response(state: UQSState) -> dict:
     if not answer and state.get("error"):
         answer = f"I encountered an issue processing your request: {state['error']}"
 
+    log.debug(
+        "node_format_response engine path: query_type=%s sub_type=%s answer_chars=%s sources=%s",
+        state.get("query_type"),
+        state.get("query_sub_type"),
+        len(answer),
+        len(state.get("engine_sources", [])),
+    )
     response = {
         "answer": answer,
         "engine": state.get("query_type", "sql"),

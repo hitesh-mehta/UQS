@@ -64,6 +64,17 @@ async def _run_pipeline(
     audit = AuditLogger(user_id=user.user_id, role=user.role, session_id=session_id)
     audit.log(AuditEvent.QUERY_RECEIVED, details={"query": query})
 
+    from backend.graph import nodes as graph_nodes
+
+    graph_nodes.log.debug(
+        "pipeline start: user_id=%s role=%s session_id=%s query_chars=%s use_case_context_chars=%s",
+        user.user_id,
+        user.role,
+        session_id,
+        len(query),
+        len(use_case_context),
+    )
+
     session = await session_store.get_or_create(
         user_id=user.user_id,
         role=user.role,
@@ -91,6 +102,13 @@ async def _run_pipeline(
     pipeline = get_pipeline()
     final_state = await pipeline.ainvoke(initial_state)
 
+    graph_nodes.log.debug(
+        "pipeline finished: keys=%s has_final_response=%s has_error=%s",
+        sorted(list(final_state.keys())),
+        bool(final_state.get("final_response")),
+        bool(final_state.get("error")),
+    )
+
     latency_ms = (time.perf_counter() - t0) * 1000
     response = final_state.get("final_response")
 
@@ -108,6 +126,15 @@ async def _run_pipeline(
         "engine": response.get("engine"),
         "from_cache": response.get("from_cache"),
     }, latency_ms=latency_ms)
+
+    graph_nodes.log.debug(
+        "pipeline response: engine=%s query_type=%s answer_chars=%s sources=%s latency_ms=%.1f",
+        response.get("engine"),
+        response.get("query_type"),
+        len(response.get("answer", "")),
+        len(response.get("sources", [])),
+        latency_ms,
+    )
 
     return response, latency_ms
 
