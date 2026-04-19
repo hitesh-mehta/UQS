@@ -278,7 +278,11 @@ export default function ChatInterface({ sessionId, onDocumentUploaded }: Props) 
           </div>
           <DocumentUpload
             sessionId={sessionId}
-            onUploaded={(doc) => { onDocumentUploaded?.(doc); setShowUpload(false); }}
+            onUploaded={(doc) => {
+              onDocumentUploaded?.(doc);
+              // Leave it open for 3 seconds so the user can see the success state
+              setTimeout(() => setShowUpload(false), 3000);
+            }}
           />
         </div>
       )}

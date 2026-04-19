@@ -66,7 +66,7 @@ async def trigger_retraining(
 
 @router.get("/models/registry")
 async def get_model_registry(
-    admin: UserContext = Depends(require_admin),
+    user: UserContext = Depends(get_current_user),
 ) -> dict:
     """Get full model registry summary."""
     return model_registry.get_registry_summary()

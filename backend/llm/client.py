@@ -340,6 +340,7 @@ async def llm_json(
         system_prompt=system_prompt,
         user_message=user_message,
         temperature=temperature,
+        max_tokens=4096,
         json_mode=True,
     )
     raw = response.content.strip()

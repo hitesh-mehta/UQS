@@ -79,5 +79,16 @@ async def login(credentials: LoginRequest):
             
     # Issue UQS backend JWT
     token = create_access_token(user_id=user_id, role=role, email=email)
-    return {"access_token": token, "token_type": "bearer", "role": role}
+    log.info(f"Login success: email={email}, assigned_role={role}")
+    return {"access_token": token, "token_type": "bearer", "role": role, "email": email}
 
+
+@router.get("/roles")
+async def public_roles():
+    """
+    Public endpoint (no auth needed) — returns available roles from DB.
+    Used by the login screen to show what roles exist.
+    """
+    from backend.core.rbac import get_all_roles
+    roles = await get_all_roles()
+    return {"roles": roles}
