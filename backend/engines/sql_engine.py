@@ -48,6 +48,14 @@ _BLOCKED_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+
+def _looks_like_non_sql_response(sql: str) -> bool:
+    """True when model returned an explanatory string/comment instead of executable SQL."""
+    cleaned = sql.strip()
+    if not cleaned:
+        return True
+    return cleaned.startswith("/*")
+
 def _is_safe_sql(sql: str) -> tuple[bool, str]:
     """Returns (is_safe, reason). Blocks any DML or DDL."""
     # Strip leading whitespace, comments, and markdown code fences
@@ -99,6 +107,25 @@ class SQLEngine:
             error_feedback="",
             audit=audit,
         )
+
+        # If model explicitly returned a non-query explanation, surface it gracefully
+        # instead of raising a safety-check error to the user.
+        if _looks_like_non_sql_response(sql):
+            fallback_answer = (
+                explanation.strip()
+                if explanation and explanation.strip()
+                else "I could not answer this from the available SQL schema. Try rephrasing with metrics or dimensions present in your data model."
+            )
+            return SQLResult(
+                sql=sql,
+                rows=[],
+                columns=[],
+                row_count=0,
+                explanation=fallback_answer,
+                sources=relevant_tables,
+                latency_ms=(time.perf_counter() - start) * 1000,
+                corrected=False,
+            )
 
         # ── Step 3: Safety Check ───────────────────────────────────────────
         is_safe, reason = _is_safe_sql(sql)
