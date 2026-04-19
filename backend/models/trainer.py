@@ -25,6 +25,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+from pandas.api.types import is_datetime64_any_dtype
 from pydantic import BaseModel
 from sklearn.ensemble import IsolationForest, RandomForestClassifier, RandomForestRegressor
 from sklearn.cluster import KMeans
@@ -247,7 +248,7 @@ class ModelTrainer:
             for col in df.columns:
                 if col == target_col:
                     continue
-                if np.issubdtype(df[col].dtype, np.datetime64):
+                if is_datetime64_any_dtype(df[col]):
                     ds_col = col
                     break
 

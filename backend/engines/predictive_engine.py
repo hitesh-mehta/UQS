@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from pandas.api.types import is_datetime64_any_dtype
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -180,7 +181,7 @@ class PredictiveEngine:
             if ds_col is None:
                 datetime_candidates = [
                     col for col in df.columns
-                    if np.issubdtype(df[col].dtype, np.datetime64) or "date" in col.lower() or "time" in col.lower()
+                    if is_datetime64_any_dtype(df[col]) or "date" in col.lower() or "time" in col.lower()
                 ]
                 ds_col = datetime_candidates[0] if datetime_candidates else None
 
