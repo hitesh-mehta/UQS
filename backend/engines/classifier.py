@@ -12,6 +12,8 @@ Taxonomy:
 """
 from __future__ import annotations
 
+import logging
+
 from pydantic import BaseModel
 
 from backend.core.logger import AuditEvent, AuditLogger
@@ -19,14 +21,16 @@ from backend.llm.client import llm_json
 from backend.llm.context_manager import UserSession
 from backend.llm.prompts.all_prompts import build_classifier_prompt
 
+log = logging.getLogger("uqs.classifier")
+
 
 # ── Result Model ──────────────────────────────────────────────────────────────
 
 class ClassificationResult(BaseModel):
     relevant: bool
     type: str      # sql | analytical | predictive | rag | rag++ | irrelevant
-    sub_type: str = ""
-    reasoning: str
+    sub_type: str | None = ""
+    reasoning: str = ""
     polite_rejection: str | None = None   # Set when irrelevant=True
 
 REJECTION_RESPONSES = [
@@ -43,6 +47,8 @@ class QueryClassifier:
     Classifies a natural language query using the LLM.
     Returns a ClassificationResult indicating relevance + engine type.
     """
+
+    _ALLOWED_TYPES = {"sql", "analytical", "predictive", "rag", "rag++", "irrelevant"}
 
     async def classify(
         self,
@@ -67,10 +73,35 @@ class QueryClassifier:
             temperature=0.0,   # Deterministic for classification
         )
 
-        relevant: bool = raw.get("relevant", False)
-        query_type: str = raw.get("type", "irrelevant").lower()
-        reasoning: str = raw.get("reasoning", "")
-        sub_type: str = raw.get("sub_type", "")
+        if not isinstance(raw, dict):
+            log.warning("Classifier received non-dict JSON payload: type=%s", type(raw).__name__)
+            raw = {}
+
+        raw_relevant = raw.get("relevant", False)
+        if isinstance(raw_relevant, str):
+            relevant = raw_relevant.strip().lower() in {"true", "1", "yes"}
+        else:
+            relevant = bool(raw_relevant)
+
+        raw_type = raw.get("type", "irrelevant")
+        query_type = str(raw_type or "irrelevant").strip().lower()
+        if query_type not in self._ALLOWED_TYPES:
+            query_type = "irrelevant"
+
+        raw_reasoning = raw.get("reasoning", "")
+        reasoning = str(raw_reasoning or "").strip()
+
+        raw_sub_type = raw.get("sub_type", "")
+        sub_type = str(raw_sub_type or "").strip()
+
+        log.debug(
+            "Classifier normalized payload: relevant=%s type=%s sub_type=%s reasoning_chars=%s raw_keys=%s",
+            relevant,
+            query_type,
+            sub_type,
+            len(reasoning),
+            sorted(raw.keys()),
+        )
 
         # Force irrelevant type if not relevant
         if not relevant:
