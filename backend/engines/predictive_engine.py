@@ -173,6 +173,7 @@ class PredictiveEngine:
 
         df = pd.DataFrame(rows, columns=columns)
         entities = df[entity_column].tolist() if entity_column in df.columns else list(range(len(df)))
+        confidence_interval: dict[str, float] | None = None
 
         if task_type == "forecasting":
             ds_col = feature_cols[0] if feature_cols and feature_cols[0] in df.columns else None
@@ -213,7 +214,20 @@ class PredictiveEngine:
             forecast_df = model.predict(forecast_input)
             raw_preds = forecast_df["yhat"].to_numpy()
             entities = forecast_df["ds"].dt.strftime("%Y-%m-%d").tolist()
-            confidence_scores = [None] * len(raw_preds)
+
+            if {"yhat_lower", "yhat_upper"}.issubset(forecast_df.columns):
+                lower = forecast_df["yhat_lower"].to_numpy()
+                upper = forecast_df["yhat_upper"].to_numpy()
+                widths = np.abs(upper - lower)
+                scale = np.maximum(np.abs(raw_preds), 1.0)
+                confidence_scores = np.clip(1.0 - (widths / scale), 0.0, 0.99).tolist()
+                confidence_interval = {
+                    "avg_lower": float(np.mean(lower)),
+                    "avg_upper": float(np.mean(upper)),
+                    "avg_width": float(np.mean(widths)),
+                }
+            else:
+                confidence_scores = [None] * len(raw_preds)
         else:
             # Use only the features the model was trained on
             available_features = [f for f in feature_cols if f in df.columns]
@@ -251,11 +265,25 @@ class PredictiveEngine:
 
         # ── Step 5: Build prediction items ───────────────────────────────
         predictions = []
+        prev_pred: float | None = None
         for entity, pred, conf in zip(entities, raw_preds, confidence_scores):
             if task_type == "classification":
                 label = self._classify_label(pred, target_name)
+            elif task_type == "forecasting" and isinstance(pred, (int, float, np.number)):
+                label = self._forecast_label(float(pred), prev_pred)
+            elif task_type == "anomaly":
+                label = "Anomaly" if str(pred) in {"-1", "-1.0"} else "Normal"
+            elif task_type == "clustering":
+                try:
+                    label = f"Cluster {int(pred)}"
+                except Exception:
+                    label = "Cluster"
             else:
-                label = None
+                label = "Predicted"
+
+            if isinstance(pred, (int, float, np.number)):
+                prev_pred = float(pred)
+
             predictions.append(PredictionItem(
                 entity=str(entity),
                 prediction=float(pred) if isinstance(pred, (int, float, np.number)) else str(pred),
@@ -299,6 +327,7 @@ class PredictiveEngine:
             model_type=model_type,
             sources=[data_sql.split("FROM")[-1].split()[0] if "FROM" in data_sql.upper() else "DB"],
             latency_ms=latency_ms,
+            confidence_interval=confidence_interval,
         )
 
     async def _bootstrap_train_model(
@@ -405,3 +434,20 @@ Respond in JSON:
                 except (ValueError, TypeError):
                     pass
         return str(pred)
+
+    def _forecast_label(self, current: float, previous: float | None) -> str:
+        """Map sequential forecast points into a trend-oriented label."""
+        if previous is None:
+            return "Baseline forecast"
+        if previous == 0:
+            return "Stable outlook"
+        change_pct = ((current - previous) / abs(previous)) * 100.0
+        if change_pct >= 5:
+            return "Strong upward trend"
+        if change_pct >= 1:
+            return "Upward trend"
+        if change_pct <= -5:
+            return "Strong downward trend"
+        if change_pct <= -1:
+            return "Downward trend"
+        return "Stable outlook"
