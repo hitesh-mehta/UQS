@@ -308,6 +308,7 @@ def setup_cron_jobs(app) -> None:
     """Register APScheduler jobs on FastAPI app startup."""
     from backend.config import settings
     if not settings.cron_enabled:
+        system_logger.info("Cron jobs disabled (CRON_ENABLED=false). Cache reports will only appear after manual generation.")
         return
 
     try:
@@ -317,13 +318,14 @@ def setup_cron_jobs(app) -> None:
         return
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: generate_report("hourly"),  "cron", minute=0)
-    scheduler.add_job(lambda: generate_report("daily"),   "cron", hour=2, minute=0)
-    scheduler.add_job(lambda: generate_report("weekly"),  "cron", day_of_week="sun", hour=3, minute=0)
-    scheduler.add_job(lambda: generate_report("monthly"), "cron", day=1, hour=4, minute=0)
+    scheduler.add_job(generate_report, "cron", args=["hourly"], minute=0)
+    scheduler.add_job(generate_report, "cron", args=["daily"], hour=2, minute=0)
+    scheduler.add_job(generate_report, "cron", args=["weekly"], day_of_week="sun", hour=3, minute=0)
+    scheduler.add_job(generate_report, "cron", args=["monthly"], day=1, hour=4, minute=0)
 
     from backend.models.continual_learning import run_all_retraining
     scheduler.add_job(run_all_retraining, "cron", hour=5, minute=0)
 
     scheduler.start()
+    app.state.scheduler = scheduler
     system_logger.log(AuditEvent.CACHE_GENERATED, details={"message": "Cron jobs scheduled (4 granularities + retraining)"})
