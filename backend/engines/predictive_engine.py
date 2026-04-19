@@ -1,25 +1,28 @@
 """
 Predictive Engine — ML inference endpoint.
 Loads the active model for a prediction target and runs inference.
-Also handles the prediction request itself: pulling live DB data,
-preprocessing it, and returning predictions with confidence intervals.
+If no model exists, it can bootstrap-train one from planner-provided SQL.
 """
 from __future__ import annotations
 
+import logging
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from backend.core.database import get_db_session
 from backend.core.logger import AuditEvent, AuditLogger
-from backend.engines.sql_engine import SQLEngine
 from backend.llm.client import llm_json
 from backend.llm.context_manager import UserSession
 from backend.models.registry import model_registry
 from backend.models.trainer import ModelTrainer, TaskType
+
+log = logging.getLogger("uqs.predictive")
 
 
 # ── Result Models ─────────────────────────────────────────────────────────────
@@ -47,7 +50,6 @@ class PredictiveResult(BaseModel):
 
 class PredictiveEngine:
     def __init__(self):
-        self._sql_engine = SQLEngine()
         self._trainer = ModelTrainer()
 
     async def run(
@@ -64,34 +66,106 @@ class PredictiveEngine:
         task_type: TaskType = plan.get("task_type", "regression")
         data_sql = plan.get("data_sql", "")
         entity_column = plan.get("entity_column", "id")
+        target_column = plan.get("target_column", "")
+        training_sql = plan.get("training_sql", "")
 
-        # ── Step 2: Load active model ──────────────────────────────────────
-        try:
-            model, metadata = model_registry.load_model(target_name)
-            model_version = metadata.get("version")
-            model_type = metadata.get("model_type", "unknown")
-            feature_cols: list[str] = metadata.get("features", [])
-        except ValueError:
-            # No model trained yet — trigger training
-            model_version = None
-            model_type = "untrained"
+        if task_type not in {"regression", "classification", "clustering", "forecasting", "anomaly"}:
+            task_type = "regression"
+
+        log.debug(
+            "predictive plan: target=%s task_type=%s has_data_sql=%s has_training_sql=%s target_column=%s entity_column=%s",
+            target_name,
+            task_type,
+            bool(data_sql.strip()),
+            bool(training_sql.strip()),
+            target_column,
+            entity_column,
+        )
+
+        if not data_sql.strip():
             latency_ms = (time.perf_counter() - start) * 1000
             return PredictiveResult(
                 target=target_name,
                 task_type=task_type,
                 predictions=[],
-                narrative=(
-                    f"No trained model found for '{target_name}'. "
-                    f"Please ask an admin to trigger training for this target."
-                ),
+                narrative="Prediction planner did not provide data_sql for inference.",
                 model_version=None,
                 model_type="untrained",
                 sources=[],
                 latency_ms=latency_ms,
             )
 
-        # ── Step 3: Fetch live data for inference ──────────────────────────
-        from sqlalchemy import text
+        # ── Step 2: Load active model, bootstrap if missing ───────────────
+        try:
+            model, metadata = model_registry.load_model(target_name)
+            model_version = metadata.get("version")
+            model_type = metadata.get("model_type", "unknown")
+            feature_cols: list[str] = metadata.get("features", [])
+        except ValueError:
+            bootstrap_sql = training_sql.strip() or data_sql.strip()
+            if not bootstrap_sql or not target_column:
+                latency_ms = (time.perf_counter() - start) * 1000
+                return PredictiveResult(
+                    target=target_name,
+                    task_type=task_type,
+                    predictions=[],
+                    narrative=(
+                        f"No trained model found for '{target_name}', and bootstrap training could not run "
+                        "because planning did not provide target_column/training_sql."
+                    ),
+                    model_version=None,
+                    model_type="untrained",
+                    sources=[],
+                    latency_ms=latency_ms,
+                )
+
+            log.info(
+                "predictive bootstrap start: target=%s task_type=%s target_column=%s",
+                target_name,
+                task_type,
+                target_column,
+            )
+
+            try:
+                model, metadata = await self._bootstrap_train_model(
+                    target_name=target_name,
+                    task_type=task_type,
+                    target_column=target_column,
+                    training_sql=bootstrap_sql,
+                    inference_sql=data_sql,
+                    audit=audit,
+                )
+                model_version = metadata.get("version")
+                model_type = metadata.get("model_type", "unknown")
+                feature_cols = metadata.get("features", [])
+                log.info(
+                    "predictive bootstrap success: target=%s version=%s model_type=%s",
+                    target_name,
+                    model_version,
+                    model_type,
+                )
+            except Exception as exc:
+                log.error(
+                    "predictive bootstrap failed: target=%s exc_type=%s exc_msg=%s",
+                    target_name,
+                    type(exc).__name__,
+                    str(exc),
+                )
+                latency_ms = (time.perf_counter() - start) * 1000
+                return PredictiveResult(
+                    target=target_name,
+                    task_type=task_type,
+                    predictions=[],
+                    narrative=(
+                        f"No trained model found for '{target_name}', and bootstrap training failed: {exc}"
+                    ),
+                    model_version=None,
+                    model_type="untrained",
+                    sources=[],
+                    latency_ms=latency_ms,
+                )
+
+        # ── Step 3: Fetch live data for inference ─────────────────────────
         async with get_db_session() as db:
             result = await db.execute(text(data_sql))
             columns = list(result.keys())
@@ -102,11 +176,27 @@ class PredictiveEngine:
 
         # Use only the features the model was trained on
         available_features = [f for f in feature_cols if f in df.columns]
-        X = df[available_features].fillna(0).values if available_features else df.select_dtypes(include=[np.number]).fillna(0).values
+        X = (
+            df[available_features].fillna(0).values
+            if available_features
+            else df.select_dtypes(include=[np.number]).fillna(0).values
+        )
 
-        # ── Step 4: Run inference ──────────────────────────────────────────
+        if X.size == 0:
+            latency_ms = (time.perf_counter() - start) * 1000
+            return PredictiveResult(
+                target=target_name,
+                task_type=task_type,
+                predictions=[],
+                narrative="Inference dataset did not contain usable features for prediction.",
+                model_version=model_version,
+                model_type=model_type,
+                sources=["DB"],
+                latency_ms=latency_ms,
+            )
+
+        # ── Step 4: Run inference ─────────────────────────────────────────
         raw_preds = model.predict(X)
-        confidence = None
 
         # For classifiers that support probability
         if hasattr(model, "predict_proba"):
@@ -118,7 +208,7 @@ class PredictiveEngine:
         else:
             confidence_scores = [None] * len(raw_preds)
 
-        # ── Step 5: Build prediction items ────────────────────────────────
+        # ── Step 5: Build prediction items ───────────────────────────────
         predictions = []
         for entity, pred, conf in zip(entities, raw_preds, confidence_scores):
             if task_type == "classification":
@@ -132,7 +222,7 @@ class PredictiveEngine:
                 label=label,
             ))
 
-        # ── Step 6: LLM narrative ──────────────────────────────────────────
+        # ── Step 6: LLM narrative ─────────────────────────────────────────
         pred_summary = f"Top predictions for {target_name}:\n"
         for p in predictions[:5]:
             pred_summary += f"  {p.entity}: {p.prediction}"
@@ -170,6 +260,68 @@ class PredictiveEngine:
             latency_ms=latency_ms,
         )
 
+    async def _bootstrap_train_model(
+        self,
+        target_name: str,
+        task_type: TaskType,
+        target_column: str,
+        training_sql: str,
+        inference_sql: str,
+        audit: AuditLogger | None,
+    ) -> tuple[Any, dict]:
+        """Train and register the first active version of a predictive target."""
+        async with get_db_session() as db:
+            result = await db.execute(text(training_sql))
+            columns = list(result.keys())
+            rows = result.fetchall()
+
+        train_df = pd.DataFrame(rows, columns=columns)
+        if train_df.empty:
+            raise ValueError("Bootstrap training dataset is empty")
+        if target_column not in train_df.columns:
+            raise ValueError(f"Bootstrap target_column '{target_column}' not found in training dataset")
+
+        model, training_result = await self._trainer.train(
+            df=train_df,
+            target_col=target_column,
+            task_type=task_type,
+            target_name=target_name,
+        )
+
+        metadata = {
+            "model_type": training_result.best_model_type,
+            "metrics": training_result.metrics,
+            "features": training_result.features,
+            "all_scores": training_result.all_model_scores,
+            "task_type": task_type,
+            "target_column": target_column,
+            "data_sql": training_sql,
+            "inference_sql": inference_sql,
+            "trained_at": datetime.now(timezone.utc).isoformat(),
+        }
+        new_version = model_registry.save_model(
+            target=target_name,
+            model=model,
+            metadata=metadata,
+            dataset_hash=training_result.dataset_hash,
+        )
+        model_registry.promote(target_name, new_version)
+
+        if audit:
+            audit.log(
+                AuditEvent.MODEL_TRAINED,
+                details={
+                    "target": target_name,
+                    "new_version": new_version,
+                    "task_type": task_type,
+                    "model_type": training_result.best_model_type,
+                    "metrics": training_result.metrics,
+                    "bootstrap": True,
+                },
+            )
+
+        return model_registry.load_model(target_name, new_version)
+
     async def _plan_prediction(self, session: UserSession, query: str) -> dict:
         """Ask LLM to determine what to predict and how to fetch the data."""
         system = f"""You are a prediction planner for a {session.use_case_context}.
@@ -182,13 +334,17 @@ Available trained model targets: {model_registry.list_targets()}
 Given a prediction question, determine:
 1. The prediction target name (must match an existing target if possible)
 2. The task type: regression | classification | clustering | forecasting | anomaly
-3. A SQL query to fetch the current data needed for prediction
-4. The entity column that identifies each row (e.g. customer_id)
+3. The target column to be predicted in historical data (e.g. churn_flag, revenue_next_month)
+4. A SQL query to fetch historical training data that includes target_column
+5. A SQL query to fetch current data for inference (can omit target_column)
+6. The entity column that identifies each row (e.g. customer_id)
 
 Respond in JSON:
 {{
   "target_name": "...",
   "task_type": "regression|classification|clustering|forecasting|anomaly",
+  "target_column": "...",
+  "training_sql": "SELECT ... FROM ...",
   "data_sql": "SELECT ... FROM ...",
   "entity_column": "customer_id"
 }}"""

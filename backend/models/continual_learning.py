@@ -141,3 +141,35 @@ async def run_all_retraining() -> list[dict]:
         except Exception as e:
             results.append({"target": target, "status": "error", "reason": str(e)})
     return results
+
+
+async def bootstrap_models_on_startup() -> dict:
+    """
+    Run a one-time retraining pass on app startup.
+
+    This reuses the same dataset-backed retraining flow as the admin/cron path,
+    but executes automatically once when the service starts.
+    """
+    targets = model_registry.list_targets()
+    if not targets:
+        return {
+            "status": "skipped",
+            "reason": "No registered predictive targets found",
+            "targets": [],
+            "results": [],
+        }
+
+    results: list[dict] = []
+    for target in targets:
+        try:
+            result = await retrain_target(target)
+            results.append(result)
+        except Exception as exc:
+            results.append({"target": target, "status": "error", "reason": str(exc)})
+
+    return {
+        "status": "completed",
+        "targets": targets,
+        "results": results,
+        "total_targets": len(targets),
+    }

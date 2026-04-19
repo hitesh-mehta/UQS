@@ -40,6 +40,19 @@ async def lifespan(app: FastAPI):
         details={"component": "database", "status": "connected" if db_ok else "FAILED"},
     )
 
+    if db_ok and not getattr(app.state, "models_bootstrapped", False):
+        from backend.models.continual_learning import bootstrap_models_on_startup
+
+        bootstrap_result = await bootstrap_models_on_startup()
+        app.state.models_bootstrapped = True
+        system_logger.log(
+            AuditEvent.MODEL_TRAINED,
+            details={
+                "message": "Startup model bootstrap complete",
+                **bootstrap_result,
+            },
+        )
+
     if settings.cron_enabled:
         from backend.cache.cron_generator import setup_cron_jobs
         setup_cron_jobs(app)
